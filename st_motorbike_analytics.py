@@ -24,7 +24,7 @@ st.set_page_config(page_title="Used Motorbike Price Analyser", page_icon="üèçÔ∏
 
 class BikeURLGenerator:
     @staticmethod
-    def generate(bike_model="", bike_type="", price_from="", price_to="", license_class="",
+    def generate(bike_model="", bike_type="", price_from=1, price_to="999999", license_class="",
                  reg_year_from="1970", reg_year_to="2024", monthly_from="", monthly_to="",
                  user="", status=10, category="", page=1):
         base_url = "https://sgbikemart.com.sg/listing/usedbikes/listing/"
@@ -625,7 +625,7 @@ def select_or_add_brand_and_model(motorbike_factory):
 def get_search_filters():
     col3, col4 = st.columns(2)
     with col3:
-        price_from = st.text_input("Price From", "0")
+        price_from = st.text_input("Price From", "1")
     with col4:
         price_to = st.text_input("Price To", "")
 
