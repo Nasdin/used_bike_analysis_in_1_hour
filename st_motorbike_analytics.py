@@ -323,10 +323,16 @@ def display_bike_analysis(bike_data):
     with col2:
         st.metric(label="Monthly Depreciation", value=f"${bike_data['monthly_depreciation']:.2f}")
 
+    col3, col4 = st.columns(2)
     # Dealer's Assumed Bike Original Value
-    st.subheader(f"Dealer's Assumed Bike Original Value: ${bike_data['Dealer']:.2f}")
-    st.caption("Assumed Bike If new Value")
-    st.caption("If this value is too high, it means the used price might be overpriced.")
+    col3.metric(label=f"Dealer's Assumed Bike Original Value",
+                      value= f"${bike_data['Dealer']:.2f}")
+    col3.caption("Assumed bike if new price, compare with what you know it costs if you buy new")
+    col3.caption("If this difference is too high, it means the used price might be overpriced.")
+    col4.metric(label="Current Asking Price:", value=f"${bike_data['Price']:.2f}")
+
+    col4.caption("You should deduct the asking price based on the % difference between brand new vs dealer's assumed value.")
+    col4.caption("e.g New costs 15k, but dealer assumed value is 18k,= 17% difference, so deduct 17% from asking price.")
 
     # Bike Details in a Table
     details_data = {
@@ -389,9 +395,10 @@ coe_price_per_month = coe_price / 120
 coe_price_per_year = coe_price / 10
 today_date = pd.Timestamp.now().strftime("%d/%m/%Y")
 
-st.sidebar.subheader(f"Price as of {today_date}: ${coe_price:.2f}")
-st.sidebar.write(f"Per month: ${coe_price_per_month:.2f}")
-st.sidebar.write(f"Per year: ${coe_price_per_year:.2f}")
+st.sidebar.subheader(f"Price as of {today_date}")
+st.sidebar.metric(label="COE Price", value=f"${coe_price:.2f}")
+st.sidebar.metric(label="Per Month", value=f"${coe_price_per_month:.2f}")
+st.sidebar.metric(label="Per Year", value=f"${coe_price_per_year:.2f}")
 
 # User Input: Select or Add Brand
 st.subheader("Search for a Used Motorbike")
