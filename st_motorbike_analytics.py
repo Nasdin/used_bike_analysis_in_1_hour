@@ -9,7 +9,6 @@ from datetime import datetime
 from urllib.parse import urljoin
 
 import aiohttp
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -120,6 +119,9 @@ class BikeAnalyzer:
 
     async def analyze(self, session, url):
         bike_info = await extract_bike_info(session, url)
+        image_path = await download_bike_image(session, bike_info)
+
+        bike_info["image_path"] = image_path
         bike_depreciation = self.depreciation_strategy.calculate(bike_info["Price"], bike_info['Total Months Left'])
         bike_info.update(bike_depreciation)
 
@@ -434,6 +436,13 @@ class DatabaseFactory:
             st.warning(f"Brand '{brand_name}' removed.")
 
 
+async def download_bike_image(session, bike_info):
+    image_url = bike_info["Image URL"]
+    image_name = image_url.split("/")[-1]
+    image_path = await save_image_from_url(session, bike_info["Image URL"], image_name)
+    return image_path
+
+
 async def save_image_from_url(session, image_url, image_name, base_url="https://sgbikemart.com.sg"):
     try:
         # Ensure the URL is absolute
@@ -461,10 +470,7 @@ async def save_image_from_url(session, image_url, image_name, base_url="https://
         return None
 
 
-async def display_bike_images(session, image_url, title):
-    image_name = image_url.split("/")[-1]  # Extract the image name from the URL
-    image_path = await save_image_from_url(session, image_url, image_name)
-
+def display_bike_images(title, image_path):
     if image_path:
         image = Image.open(image_path)
         st.image(image, caption=title, width=500)
@@ -569,9 +575,10 @@ def display_price_data(bike_data):
             st.dataframe(yearly_df)
 
 
-async def display_bike_analysis(session, bike_data):
+def display_bike_analysis(bike_data):
+    image_path = bike_data["image_path"]
     display_bike_title_and_links(bike_data)
-    await display_bike_images(session, bike_data["Image URL"], bike_data["Title"])
+    display_bike_images(bike_data["Title"], image_path)
     display_metrics(bike_data)
     recommended_low_price_placeholder, recommended_price_placeholder = display_recommended_prices()
     display_bike_details_table(bike_data)
@@ -751,7 +758,7 @@ async def display_search_results(session, bike_listing_urls, bike_analyzer, bran
     for i, analysis_task in enumerate(asyncio.as_completed(analysis_tasks)):
         bike_data = await analysis_task
 
-        low_placeholder, rec_placeholder = await display_bike_analysis(session, bike_data)
+        low_placeholder, rec_placeholder = display_bike_analysis(bike_data)
         sidebar_data = update_sidebar_if_lowest(bike_data, bike_analyzer.lowest_dealer_price_seen, sidebar_data)
 
         analyzed_bikes.append((bike_data, low_placeholder, rec_placeholder))
