@@ -1,6 +1,7 @@
 import calendar
 import os
 import re
+import sqlite3
 import tempfile
 import time
 from datetime import datetime
@@ -28,11 +29,12 @@ def generate_used_bike_search_url(
         monthly_to="",
         user="",
         status="50",
-        category=""
+        category="",
+        page=1
 ):
     base_url = "https://sgbikemart.com.sg/listing/usedbikes/listing/"
     query_params = (
-        f"?bike_model={bike_model}&bike_type={bike_type}&price_from={price_from}"
+        f"?page={page}&bike_model={bike_model}&bike_type={bike_type}&price_from={price_from}"
         f"&price_to={price_to}&license_class={license_class}&reg_year_from={reg_year_from}"
         f"&reg_year_to={reg_year_to}&monthly_from={monthly_from}&monthly_to={monthly_to}"
         f"&user={user}&status={status}&category={category}"
@@ -269,19 +271,154 @@ def extract_bike_listing_urls(base_url):
 
 
 # Global cache for brands and models
-@st.cache_data
-def get_cached_data():
-    return {
-        "brands": ["Honda", "Yamaha", "Suzuki"],  # Pre-populate with some brands
-        "models": {
-            "Honda": sorted(
-                ["CB125", "MSX125", "PCX150", "PCX160", "CV200X", "CV190R", "RX-X 150", "CRF150L", "ADV 150", "ADV 160",
-                 "ADV 350", "CB400F",
-                 "CBR500R"]),
-            "Yamaha": sorted(["Aerox 155", "Aerox 155 R", "FZS150", "Sniper 150", "MT-15", "X1-R 135", "XSR155"]),
-            "Suzuki": sorted(["Address 110"])
-        }
+def get_db_connection():
+    db_path = "motorbike_data.db"
+
+    # Create a new database file if it doesn't exist
+    conn = sqlite3.connect(db_path)
+
+    # Create tables if they don't exist
+    with conn:
+        conn.execute('''CREATE TABLE IF NOT EXISTS brands (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            name TEXT UNIQUE NOT NULL
+                        )''')
+
+        conn.execute('''CREATE TABLE IF NOT EXISTS models (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            brand_id INTEGER NOT NULL,
+                            name TEXT NOT NULL,
+                            FOREIGN KEY (brand_id) REFERENCES brands(id)
+                        )''')
+
+    # Check if the tables are empty, and prepopulate if necessary
+    cursor = conn.cursor()
+
+    cursor.execute('SELECT COUNT(*) FROM brands')
+    if cursor.fetchone()[0] == 0:
+        prepopulate_db(conn)
+
+    return conn
+
+
+def prepopulate_db(conn):
+    initial_data = {
+        "Honda": ["CB125", "MSX125", "PCX150", "PCX160", "CV200X", "CV190R", "RX-X 150", "CRF150L", "ADV 150",
+                  "ADV 160",
+                  "ADV 350", "CB400F", "CBR500R"],
+        "Yamaha": ["Aerox 155", "Aerox 155 R", "FZS150", "Sniper 150", "MT-15", "X1-R 135", "XSR155"],
+        "Suzuki": ["Address 110"]
     }
+
+    for brand, models in initial_data.items():
+        insert_brand(conn, brand, silence=True)
+        for model in models:
+            insert_model(conn, brand, model, silence=True)
+
+
+def insert_brand(conn, brand_name, silence=False):
+    brand_name = brand_name.capitalize()
+
+    cursor = conn.cursor()
+    cursor.execute('SELECT id FROM brands WHERE name = ?', (brand_name,))
+    brand_exists = cursor.fetchone()
+
+    if not brand_exists:
+        with conn:
+            conn.execute('INSERT INTO brands (name) VALUES (?)', (brand_name,))
+        if not silence:
+            st.info(f"Brand '{brand_name}' added.")
+    else:
+        if not silence:
+            st.warning(f"Brand '{brand_name}' already exists.")
+
+
+def insert_model(conn, brand_name, model_name, silence=False):
+    brand_name = brand_name.capitalize()
+    model_name = model_name.capitalize()
+
+    cursor = conn.cursor()
+    cursor.execute('SELECT id FROM brands WHERE name = ?', (brand_name,))
+    brand_id = cursor.fetchone()
+
+    if brand_id:
+        cursor.execute('''
+            SELECT id FROM models 
+            WHERE brand_id = ? AND name = ?
+        ''', (brand_id[0], model_name))
+        model_exists = cursor.fetchone()
+
+        if not model_exists:
+            with conn:
+                conn.execute('INSERT INTO models (brand_id, name) VALUES (?, ?)', (brand_id[0], model_name))
+            if not silence:
+                st.info(f"Model '{model_name}' added under brand '{brand_name}'.")
+        else:
+            if not silence:
+                st.info(f"Model '{model_name}' already exists under brand '{brand_name}'.")
+    else:
+        if not silence:
+            st.warning(f"Brand '{brand_name}' not found. Please add the brand first.")
+
+
+def get_all_brands_sorted(conn):
+    cursor = conn.cursor()
+    cursor.execute('SELECT name FROM brands ORDER BY name ASC')
+    brands = [row[0] for row in cursor.fetchall()]
+    return brands
+
+
+def get_all_models_sorted(conn, brand_name):
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT models.name 
+        FROM models 
+        JOIN brands ON models.brand_id = brands.id 
+        WHERE brands.name = ?
+        ORDER BY models.name ASC
+    ''', (brand_name.capitalize(),))
+    models = [row[0] for row in cursor.fetchall()]
+    return models
+
+
+def remove_model(conn, brand_name, model_name):
+    if model_name:
+        brand_name = brand_name.capitalize()
+        model_name = model_name.capitalize()
+
+        cursor = conn.cursor()
+        cursor.execute('SELECT id FROM brands WHERE name = ?', (brand_name,))
+        brand_id = cursor.fetchone()
+
+        if brand_id:
+            cursor.execute('''
+                SELECT id FROM models 
+                WHERE brand_id = ? AND name = ?
+            ''', (brand_id[0], model_name))
+            model_id = cursor.fetchone()
+
+            if model_id:
+                with conn:
+                    conn.execute('DELETE FROM models WHERE id = ?', (model_id[0],))
+                st.info(f"Model '{model_name}' removed from brand '{brand_name}'.")
+            else:
+                st.warning(f"Model '{model_name}' does not exist under brand '{brand_name}'.")
+        else:
+            st.error(f"Brand '{brand_name}' not found.")
+
+
+def remove_empty_brand(conn, brand_name):
+    cursor = conn.cursor()
+    cursor.execute('''
+                    SELECT id FROM models 
+                    WHERE brand_id = ? 
+                ''', (brand_name.capitalize(),))
+    model_exists = cursor.fetchone()
+    if not model_exists:
+        cursor.execute('''
+                        DELETE FROM brands WHERE name = ?
+                    ''', (brand_name.capitalize(),))
+        st.warning(f"Brand '{brand_name}' removed.")
 
 
 def save_image_from_url(image_url, image_name, base_url="https://sgbikemart.com.sg"):
@@ -408,9 +545,7 @@ def display_bike_analysis(bike_data):
     return recommended_low_price_placeholder, recommended_price_placeholder
 
 
-cached_data = get_cached_data()
-for brand in cached_data["models"]:
-    cached_data["models"][brand].sort()
+motorbike_local_db = get_db_connection()
 
 # Streamlit app title
 st.title("Used Motorbike Price Analyser")
@@ -423,44 +558,39 @@ coe_price_per_month = coe_price / 120
 coe_price_per_year = coe_price / 10
 today_date = pd.Timestamp.now().strftime("%d/%m/%Y")
 
-
-
 st.sidebar.subheader(f"Price as of {today_date}")
 st.sidebar.metric(label="COE Price", value=f"${coe_price:.2f}")
 st.sidebar.metric(label="Per Month", value=f"${coe_price_per_month:.2f}")
 st.sidebar.metric(label="Per Year", value=f"${coe_price_per_year:.2f}")
-
 
 st.sidebar.header("Analytics Summary")
 st.sidebar.caption("Most price to value motorbike found")
 sidebar_model = st.sidebar.empty()
 sidebar_posting_id = st.sidebar.empty()
 sidebar_price = st.sidebar.empty()
-c,d = st.sidebar.columns(2)
+c, d = st.sidebar.columns(2)
 sidebar_monthly_depreciation = c.empty()
 sidebar_annual_depreciation = d.empty()
 sidebar_bike_coe_left = st.sidebar.empty()
 sidebar_link = st.sidebar.empty()
-
 
 # User Input: Select or Add Brand
 st.subheader("Search for a Used Motorbike")
 col1, col2 = st.columns(2)
 
 with col1:
-    brand = st.selectbox("Select Brand", options=cached_data["brands"], index=0)
+    brand = st.selectbox("Select Brand", options=get_all_brands_sorted(motorbike_local_db), index=0)
     new_brand = st.text_input("Or Enter a New Brand").title()
     if new_brand:
-        if new_brand not in cached_data["brands"]:
-            cached_data["brands"].append(new_brand)
-            cached_data["models"][new_brand] = []
+        insert_brand(motorbike_local_db, new_brand)
+        brand = new_brand
 
 with col2:
-    model = st.selectbox("Select Model", options=cached_data["models"].get(brand, []), index=0)
+    model = st.selectbox("Select Model", options=get_all_models_sorted(motorbike_local_db, brand), index=0)
     new_model = st.text_input("Or Enter a New Model").title()
     if new_model:
-        if new_model not in cached_data["models"].get(brand, []):
-            cached_data["models"][brand].append(new_model)
+        insert_model(motorbike_local_db, brand, new_model)
+        model = new_model
 
 # Additional search filters with defaults
 col3, col4 = st.columns(2)
@@ -484,20 +614,44 @@ with col6:
 # Search Button
 if st.button("Search"):
     bike_model_cleaned = f"{brand} {model}".replace(" ", "+")
+    bike_listing_urls = []
+    page = 1
+    while True:
 
-    bike_listings_url = generate_used_bike_search_url(
-        bike_model=bike_model_cleaned,
-        price_from=price_from,
-        price_to=price_to,
-        license_class=license_class,
-        reg_year_from=reg_year_from,
-        reg_year_to=reg_year_to,
-        status=10,  # Available
-    )
+        bike_listings_url = generate_used_bike_search_url(
+            bike_model=bike_model_cleaned,
+            price_from=price_from,
+            price_to=price_to,
+            license_class=license_class,
+            reg_year_from=reg_year_from,
+            reg_year_to=reg_year_to,
+            status=10,  # Available
+            page=page
+        )
 
-    bike_listing_urls = extract_bike_listing_urls(bike_listings_url)
-
+        new_bike_listing_urls = extract_bike_listing_urls(bike_listings_url)
+        if len(new_bike_listing_urls) < 1:
+            break
+        else:
+            bike_listing_urls.extend(new_bike_listing_urls)
+            page += 1
     st.subheader(f"Found {len(bike_listing_urls)} bikes:")
+    st.header("Analyzing Bikes Heatmap")
+    analytics_plot = st.empty()
+
+    if len(bike_listing_urls) == 0:
+        st.warning("No bikes found with the given criteria.")
+        test_url = generate_used_bike_search_url(
+            bike_model=bike_model_cleaned,
+
+        )
+        test_count = extract_bike_listing_urls(test_url)
+        if len(test_count) < 1:
+            st.warning(
+                f"We could find any bikes for {bike_model_cleaned}, perhaps you should try another model, or the spacing is wrong e.g MSX125 instead of MSX 125 and ADV 150 instead of ADV150.\n This bike model will be removed from the database")
+            remove_model(motorbike_local_db, brand, model)
+            remove_empty_brand(motorbike_local_db, brand)
+
     progress_bar = st.progress(0)
     bike_data_list = []
 
@@ -516,12 +670,13 @@ if st.button("Search"):
 
             sidebar_model.subheader(lowest_bd['Title'])
             sidebar_price.metric(label="Asking Price", value=f"${lowest_bd['Price']:.2f}")
-            sidebar_monthly_depreciation.metric(label="Monthly Depreciation", value=f"${lowest_bd['monthly_depreciation']:.2f}")
-            sidebar_annual_depreciation.metric(label="Annual Depreciation", value=f"${lowest_bd['annual_depreciation']:.2f}")
+            sidebar_monthly_depreciation.metric(label="Monthly Depreciation",
+                                                value=f"${lowest_bd['monthly_depreciation']:.2f}")
+            sidebar_annual_depreciation.metric(label="Annual Depreciation",
+                                               value=f"${lowest_bd['annual_depreciation']:.2f}")
             sidebar_bike_coe_left.metric(label="COE Left", value=lowest_bd['Years & Months Left'])
             sidebar_link.markdown(f"[SGBike Mart Listing]({lowest_bd['URL']})")
             sidebar_posting_id.caption(f"Listing ID: {lowest_bd['URL'].split('/')[-2]}")
-
 
         placeholder_low, placeholder_rec = display_bike_analysis(bd)
         analyzed_bikes.append((bd, placeholder_low, placeholder_rec))
