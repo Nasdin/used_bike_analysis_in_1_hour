@@ -655,6 +655,7 @@ if st.button("Search"):
     st.subheader(f"Found {len(bike_listing_urls)} bikes:")
     st.header("Analyzing Bikes...")
     st.caption("Scroll down to see details")
+    progress_bar1 = st.progress(0)
     # Initialize empty DataFrame for scatter charts
     scatter_data = pd.DataFrame(columns=["COE Months Left", "Price",
                                          # "Annual_Depreciation"
@@ -748,6 +749,7 @@ if st.button("Search"):
         placeholder_low, placeholder_rec = display_bike_analysis(bd)
         analyzed_bikes.append((bd, placeholder_low, placeholder_rec))
         progress_bar.progress((i + 1) / len(bike_listing_urls))
+        progress_bar1.progress((i + 1) / len(bike_listing_urls))
         time.sleep(0.05)  # Just for demonstration of real-time fetching
 
         for analyzed_bike in analyzed_bikes:
