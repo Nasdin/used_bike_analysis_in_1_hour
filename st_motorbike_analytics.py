@@ -319,7 +319,7 @@ class DatabaseFactory:
         "Suzuki": ["Address 110"]
     }
 
-    def __init__(self, db_path="motorbike_data.db"):
+    def __init__(self, db_path="./motorbike_data.db"):
         self.conn = sqlite3.connect(db_path)
         self._initialize_tables()
 
@@ -418,15 +418,17 @@ class DatabaseFactory:
 
     def remove_empty_brand(self, brand_name):
         cursor = self.conn.cursor()
+        cursor.execute('SELECT id FROM brands WHERE name = ?', (brand_name.capitalize(),))
+        brand_id = cursor.fetchone()[0]
         cursor.execute('''
                         SELECT id FROM models 
                         WHERE brand_id = ? 
-                    ''', (brand_name.capitalize(),))
+                    ''', (brand_id,))
         model_exists = cursor.fetchone()
         if not model_exists:
             cursor.execute('''
-                            DELETE FROM brands WHERE name = ?
-                        ''', (brand_name.capitalize(),))
+                            DELETE FROM brands WHERE id = ?
+                        ''', (brand_id,))
             st.warning(f"Brand '{brand_name}' removed.")
 
 
