@@ -272,8 +272,11 @@ def extract_bike_listing_urls(base_url):
 def get_cached_data():
     return {
         "brands": ["Honda", "Yamaha", "Suzuki"],  # Pre-populate with some brands
-        "models": {"Honda": ["CB125", "ADV 150", "CB400F", "CBR500R"], "Yamaha": ["Aerox 155" "Aerox 155 R"],
-                   "Suzuki": ["Address 110"]}
+        "models": {
+            "Honda": ["CB125", "MSX125", "PCX150", "CV200X", "CV190R", "RX-X 150", "CRF150L", "ADV 150", "CB400F",
+                      "CBR500R"],
+            "Yamaha": ["Aerox 155", "Aerox 155 R", "FZS150", "Sniper 150", "MT-15", "X1-R 135"],
+            "Suzuki": ["Address 110"]}
     }
 
 
@@ -326,13 +329,15 @@ def display_bike_analysis(bike_data):
     col3, col4 = st.columns(2)
     # Dealer's Assumed Bike Original Value
     col3.metric(label=f"Dealer's Assumed Bike Original Value",
-                      value= f"${bike_data['Dealer']:.2f}")
+                value=f"${bike_data['Dealer']:.2f}")
     col3.caption("Assumed bike if new price, compare with what you know it costs if you buy new")
     col3.caption("If this difference is too high, it means the used price might be overpriced.")
     col4.metric(label="Current Asking Price:", value=f"${bike_data['Price']:.2f}")
 
-    col4.caption("You should deduct the asking price based on the % difference between brand new vs dealer's assumed value.")
-    col4.caption("e.g New costs 15k, but dealer assumed value is 18k,= 17% difference, so deduct 17% from asking price.")
+    col4.caption(
+        "You should deduct the asking price based on the % difference between brand new vs dealer's assumed value.")
+    col4.caption(
+        "e.g New costs 15k, but dealer assumed value is 18k,= 17% difference, so deduct 17% from asking price.")
 
     # Bike Details in a Table
     details_data = {
