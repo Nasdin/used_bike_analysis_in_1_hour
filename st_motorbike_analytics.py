@@ -16,7 +16,9 @@ from PIL import Image
 from bs4 import BeautifulSoup
 
 st.set_page_config(page_title="Used Motorbike Price Analyser", page_icon="🏍️", menu_items={
-    "About": "This is a simple app to analyze used motorbike prices from SGBikeMart. It was built within an hour, and then fixed over 3 hours. By Din. https://github.com/Nasdin/used_bike_analysis_in_1_hour",
+    "About": "This is a simple app to analyze used motorbike prices from SGBikeMart. "
+             "It was built within an hour, and then fixed over 3 hours."
+             "By Din. https://github.com/Nasdin/used_bike_analysis_in_1_hour",
     "Report a Bug": "https://github.com/Nasdin/used_bike_analysis_in_1_hour"})
 
 
@@ -78,9 +80,44 @@ class BikeAnalyzer:
     def __init__(self, depreciation_strategy, projection_strategy):
         self.depreciation_strategy = depreciation_strategy
         self.projection_strategy = projection_strategy
+        self.bike_data = {}
+        self.lowest_dealer_price_seen = float('inf')
+
+    def update_lowest_dealer_price_seen(self, price):
+        if price < self.lowest_dealer_price_seen:
+            self.lowest_dealer_price_seen = price
+
+    @staticmethod
+    def extract_sgbikemart_id(url):
+        return url.split("/")[-2]
+
+    def recommend_low_price(self, bike_data):
+        try:
+            recommended_low_price = self.lowest_dealer_price_seen / bike_data['Dealer'] * bike_data['Price']
+            delta_low_price = recommended_low_price - bike_data['Price']
+        except:
+            monthly_depreciations = [b["monthly_depreciation"] for b in self.bike_data.values() if
+                                     b["monthly_depreciation"] is not np.nan]
+            average_monthly_depreciation = np.mean(monthly_depreciations)
+            recommended_low_price = (self.lowest_dealer_price_seen + (
+                    bike_data['Total Months Left'] * average_monthly_depreciation)) / 2
+            delta_low_price = np.nan
+        return recommended_low_price, delta_low_price
+
+    def recommend_middle_price(self, bike_data, recommended_low_price):
+        try:
+            recommended_middle_price = (recommended_low_price + bike_data['Price']) / 2
+            delta_middle_price = recommended_middle_price - bike_data['Price']
+        except:
+            monthly_depreciations = [b["monthly_depreciation"] for b in self.bike_data.values() if
+                                     b["monthly_depreciation"] is not np.nan]
+            average_monthly_depreciation = np.mean(monthly_depreciations)
+            recommended_middle_price = (bike_data['Total Months Left'] * average_monthly_depreciation)
+            delta_middle_price = np.nan
+        return recommended_middle_price, delta_middle_price
 
     def analyze(self, url):
-        bike_info = self._extract_bike_info(url)
+        bike_info = extract_bike_info(url)
         bike_depreciation = self.depreciation_strategy.calculate(bike_info["Price"], bike_info['Total Months Left'])
         bike_info.update(bike_depreciation)
 
@@ -91,6 +128,7 @@ class BikeAnalyzer:
 
         try:
             bike_info["Dealer"] = list(monthly_prices.values())[0]
+            self.update_lowest_dealer_price_seen(bike_info["Dealer"])
             bike_info["monthly_price_data"] = monthly_prices
             bike_info["yearly_price_data"] = yearly_prices
         except AttributeError:
@@ -98,78 +136,81 @@ class BikeAnalyzer:
             bike_info["monthly_price_data"] = np.nan
             bike_info["yearly_price_data"] = np.nan
 
+        self.bike_data[self.extract_sgbikemart_id(url)] = bike_info
+
         return bike_info
 
-    @staticmethod
-    def _extract_bike_info(url):
-        # Same as your extract_bike_info function implementation
-        response = requests.get(url)
-        soup = BeautifulSoup(response.content, 'html.parser')
 
-        # Extracting information
-        title = soup.find('h2', class_='card-title').text.strip()
-        price = soup.find('h2', class_='text-center strong').text.strip()
+@st.cache_data(ttl=2592000)
+def extract_bike_info(bike_url):
+    # Same as your extract_bike_info function implementation
+    response = requests.get(bike_url)
+    soup = BeautifulSoup(response.content, 'html.parser')
 
-        # Details Table
-        details_table = soup.find('table', class_='table mb-0')
-        details = {}
-        for row in details_table.find_all('tr'):
-            key = row.find('td', class_='name').text.strip()
-            value = row.find('td', class_='value').text.strip()
-            details[key] = value
+    # Extracting information
+    title = soup.find('h2', class_='card-title').text.strip()
+    price = soup.find('h2', class_='text-center strong').text.strip()
 
-        # Extracting specific details
-        brand = details.get('Brand', 'N/A')
-        model = details.get('Model', 'N/A')
-        engine_capacity = details.get('Engine Capacity', 'N/A')
-        classification = details.get('Classification', 'N/A')
-        registration_date = details.get('Registration Date', 'N/A')
-        coe_expiry_date = details.get('COE Expiry Date', 'N/A')
-        vehicle_type = details.get('Type of Vehicle', 'N/A')
+    # Details Table
+    details_table = soup.find('table', class_='table mb-0')
+    details = {}
+    for row in details_table.find_all('tr'):
+        key = row.find('td', class_='name').text.strip()
+        value = row.find('td', class_='value').text.strip()
+        details[key] = value
 
-        # Calculating remaining COE
-        if coe_expiry_date != 'N/A':
-            coe_expiry_date_clean = coe_expiry_date.split()[0]
-            coe_expiry_date_obj = datetime.strptime(coe_expiry_date_clean, '%d/%m/%Y')
-            today = datetime.today()
-            remaining_time = coe_expiry_date_obj - today
-            remaining_years = remaining_time.days // 365
-            remaining_months = (remaining_time.days % 365) // 30
-            total_remaining_months = remaining_time.days / 30
-        else:
-            remaining_years = remaining_months = total_remaining_months = 'N/A'
+    # Extracting specific details
+    brand = details.get('Brand', 'N/A')
+    model = details.get('Model', 'N/A')
+    engine_capacity = details.get('Engine Capacity', 'N/A')
+    classification = details.get('Classification', 'N/A')
+    registration_date = details.get('Registration Date', 'N/A')
+    coe_expiry_date = details.get('COE Expiry Date', 'N/A')
+    vehicle_type = details.get('Type of Vehicle', 'N/A')
 
-        # Extracting description
-        description_div = soup.find('div', class_='listing-details')
-        description = description_div.text.strip() if description_div else 'N/A'
+    # Calculating remaining COE
+    if coe_expiry_date != 'N/A':
+        coe_expiry_date_clean = coe_expiry_date.split()[0]
+        coe_expiry_date_obj = datetime.strptime(coe_expiry_date_clean, '%d/%m/%Y')
+        today = datetime.today()
+        remaining_time = coe_expiry_date_obj - today
+        remaining_years = remaining_time.days // 365
+        remaining_months = (remaining_time.days % 365) // 30
+        total_remaining_months = remaining_time.days / 30
+    else:
+        remaining_years = remaining_months = total_remaining_months = 'N/A'
 
-        # Extracting the bike image URL
-        image_div = soup.find('div', class_='slider-item')
-        image_style = image_div.get('style') if image_div else ''
-        image_url = ''
-        if image_style:
-            image_url = image_style.split("url('")[1].split("')")[0]
+    # Extracting description
+    description_div = soup.find('div', class_='listing-details')
+    description = description_div.text.strip() if description_div else 'N/A'
 
-        # Creating the dictionary with the extracted information
-        bike_info = {
-            "Title": title,
-            "Brand": brand,
-            "Model": model,
-            "Engine Capacity": engine_capacity,
-            "Classification": classification,
-            "Registration Date": registration_date,
-            "COE Expiry Date": coe_expiry_date,
-            "Total Months Left": total_remaining_months,
-            "Years & Months Left": f"{remaining_years} years, {remaining_months} months",
-            "Type of Vehicle": vehicle_type,
-            "Description": description,
-            "Image URL": image_url,
-            "URL": url
-        }
-        bike_info.update(split_currency_value(price))
+    # Extracting the bike image URL
+    image_div = soup.find('div', class_='slider-item')
+    image_style = image_div.get('style') if image_div else ''
+    image_url = ''
+    if image_style:
+        image_url = image_style.split("url('")[1].split("')")[0]
 
-        # Returning the dictionary
-        return bike_info
+    # Creating the dictionary with the extracted information
+    bike_info = {
+        "Title": title,
+        "Brand": brand,
+        "Model": model,
+        "Engine Capacity": engine_capacity,
+        "Classification": classification,
+        "Registration Date": registration_date,
+        "COE Expiry Date": coe_expiry_date,
+        "Total Months Left": total_remaining_months,
+        "Years & Months Left": f"{remaining_years} years, {remaining_months} months",
+        "Type of Vehicle": vehicle_type,
+        "Description": description,
+        "Image URL": image_url,
+        "URL": bike_url
+    }
+    bike_info.update(split_currency_value(price))
+
+    # Returning the dictionary
+    return bike_info
 
 
 class PriceProjectionStrategy:
@@ -270,6 +311,14 @@ def extract_bike_listing_urls(base_url):
 
 
 class DatabaseFactory:
+    initial_data = {
+        "Honda": ["CB125", "MSX125", "PCX150", "PCX160", "CV200X", "CV190R", "RX-X 150", "CRF150L", "ADV 150",
+                  "ADV 160",
+                  "ADV 350", "CB400F", "CBR500R"],
+        "Yamaha": ["Aerox 155", "Aerox 155 R", "FZS150", "Sniper 150", "MT-15", "X1-R 135", "XSR155"],
+        "Suzuki": ["Address 110"]
+    }
+
     def __init__(self, db_path="motorbike_data.db"):
         self.conn = sqlite3.connect(db_path)
         self._initialize_tables()
@@ -287,8 +336,15 @@ class DatabaseFactory:
                                     FOREIGN KEY (brand_id) REFERENCES brands(id)
                                 )''')
 
-    def prepopulate_db(self, initial_data):
-        for brand, models in initial_data.items():
+            # Check if the tables are empty, and prepopulate if necessary
+            cursor = self.conn.cursor()
+
+            cursor.execute('SELECT COUNT(*) FROM brands')
+            if cursor.fetchone()[0] == 0:
+                self.prepopulate_db()
+
+    def prepopulate_db(self):
+        for brand, models in self.initial_data.items():
             self.insert_brand(brand, silence=True)
             for model in models:
                 self.insert_model(brand, model, silence=True)
@@ -411,50 +467,73 @@ def display_bike_images(image_url, title):
 def safe_format(value):
     if value is np.nan:
         return "N/A"
+    elif isinstance(value, str):
+        try:
+            value = float(value)
+            return f"${value:.2f}"
+        except:
+            return "N/A"
     else:
         return f"${value:.2f}"
 
 
-def display_bike_analysis(bike_data):
-    # Get the title by combining bike_data title and the url to make it clickable
-    # Create new title by combining the title and the post number found at the end of the url
-    st.title(bike_data["Title"])
+def display_bike_title_and_links(bike_data):
+    title = bike_data["Title"]
+    st.title(title)
+
     col1, col2 = st.columns(2)
-    col1.caption("SGBike Mart Listing ID: " + bike_data["URL"].split("/")[-2])
+    listing_id = bike_data["URL"].split("/")[-2]
+    col1.caption(f"SGBike Mart Listing ID: {listing_id}")
     col2.markdown(f"[SGBike Mart Listing]({bike_data['URL']})")
 
-    display_bike_images(bike_data["Image URL"], bike_data["Title"])
 
-    # Highlighted metrics: Annual and Monthly Depreciation
+def display_metrics(bike_data):
     col1, col2 = st.columns(2)
     with col1:
-        st.metric(label="Analytics: Annual Depreciation", value=safe_format(bike_data['annual_depreciation']),
-                  help="Estimated based on the bike becoming 10% of its value at end of COE")
+        st.metric(
+            label="Analytics: Annual Depreciation",
+            value=safe_format(bike_data['annual_depreciation']),
+            help="Estimated based on the bike becoming 10% of its value at end of COE"
+        )
     with col2:
-        st.metric(label="Analytics: Monthly Depreciation", value=safe_format(bike_data['monthly_depreciation']),
-                  help="The 'True' cost of your bike every month, as it will become close to worthless at end of its COE lifespan")
+        st.metric(
+            label="Analytics: Monthly Depreciation",
+            value=safe_format(bike_data['monthly_depreciation']),
+            help="The 'True' cost of your bike every month, as it will become close to worthless at end of its COE lifespan"
+        )
 
-    # Dealer's Assumed Bike Original Value
     col3, col4 = st.columns(2)
-    col3.metric(label="Analytics: Dealer's Assumed Original Value", value=safe_format(bike_data['Dealer']),
-                help="What the dealer is pricing it at if its new, you should compare with the actual new price")
-
-    col4.metric(label="Current Asking Price:", value=safe_format(bike_data['Price']),
-                help="You should deduct the asking price based on the % difference between brand new vs dealer's assumed value.")
+    with col3:
+        st.metric(
+            label="Analytics: Dealer's Assumed Original Value",
+            value=safe_format(bike_data['Dealer']),
+            help="What the dealer is pricing it at if it's new, you should compare with the actual new price"
+        )
+    with col4:
+        st.metric(
+            label="Current Asking Price",
+            value=safe_format(bike_data['Price']),
+            help="You should deduct the asking price based on the % difference between brand new vs dealer's assumed value."
+        )
     st.caption(
-        "If dealer is charging much more than what it costs new, you should deduct the difference from the asking price.")
-    st.caption("e.g New costs 15k, but dealer assumed value is 18k,= 17% difference, so deduct 17% from asking price.")
-    # Placeholder for recommended price and low price
-    st.subheader("Analytics: Recommended Prices to offer")
+        "If the dealer is charging much more than what it costs new, you should deduct the difference from the asking price."
+    )
+    st.caption("e.g New costs 15k, but dealer assumed value is 18k, = 17% difference, so deduct 17% from asking price.")
+
+
+def display_recommended_prices():
+    st.subheader("Analytics: Recommended prices to offer")
     st.caption("We get this estimate by comparing with other listings")
     col5, col6 = st.columns(2)
     st.caption("This offer value will update as we fetch more data!")
     recommended_low_price_placeholder = col5.empty()
     recommended_price_placeholder = col6.empty()
+    return recommended_low_price_placeholder, recommended_price_placeholder
 
+
+def display_bike_details_table(bike_data):
     st.subheader("Bike information")
 
-    # Bike Details in a Table
     details_data = {
         "Brand": bike_data["Brand"],
         "Model": bike_data["Model"],
@@ -473,13 +552,13 @@ def display_bike_analysis(bike_data):
     details_df = pd.DataFrame(details_data.items(), columns=["Attribute", "Value"])
     st.table(details_df)
 
+
+def display_price_data(bike_data):
     if bike_data['Price'] is not np.nan:
-        # Expandable DataFrames for Monthly and Yearly Price Data
         with st.expander("Show Monthly Price Data"):
             monthly_df = pd.DataFrame.from_dict(bike_data["monthly_price_data"], orient='index', columns=["Price"])
             st.dataframe(monthly_df)
 
-            # Plotting the time series
             st.subheader("Monthly Price Over Time")
             plt.figure(figsize=(10, 4))
             plt.plot(monthly_df.index, monthly_df["Price"], marker='o')
@@ -493,7 +572,6 @@ def display_bike_analysis(bike_data):
             yearly_df = pd.DataFrame.from_dict(bike_data["yearly_price_data"], orient='index', columns=["Price"])
             st.dataframe(yearly_df)
 
-            # Plotting the time series
             st.subheader("Yearly Price Over Time")
             plt.figure(figsize=(10, 4))
             plt.plot(yearly_df.index, yearly_df["Price"], marker='o', color='orange')
@@ -503,222 +581,285 @@ def display_bike_analysis(bike_data):
             plt.xticks(rotation=45)
             st.pyplot(plt)
 
+
+def display_bike_analysis(bike_data):
+    display_bike_title_and_links(bike_data)
+    display_bike_images(bike_data["Image URL"], bike_data["Title"])
+    display_metrics(bike_data)
+    recommended_low_price_placeholder, recommended_price_placeholder = display_recommended_prices()
+    display_bike_details_table(bike_data)
+    display_price_data(bike_data)
+
     return recommended_low_price_placeholder, recommended_price_placeholder
 
 
-motorbike_factory = DatabaseFactory()
-bike_analyzer = BikeAnalyzer(DepreciationStrategy(), PriceProjectionStrategy())
+def display_coe_price_sidebar():
+    st.sidebar.header("Current Motorbike COE Price")
+    coe_price = get_current_coe_price()
+    coe_price_per_month = coe_price / 120
+    coe_price_per_year = coe_price / 10
+    today_date = pd.Timestamp.now().strftime("%d/%m/%Y")
 
-# Streamlit app title
-st.title("Used Motorbikes scanner")
-st.caption("For TechOverflow (A 1 hour hackathon by Din)")
+    st.sidebar.subheader(f"Price as of {today_date}")
+    st.sidebar.metric(label="COE Price", value=f"${coe_price:.2f}")
+    st.sidebar.metric(label="Per Month", value=f"${coe_price_per_month:.2f}")
+    st.sidebar.metric(label="Per Year", value=f"${coe_price_per_year:.2f}")
 
-# Sidebar: Display COE Price
-st.sidebar.header("Current Motorbike COE Price")
-coe_price = get_current_coe_price()
-coe_price_per_month = coe_price / 120
-coe_price_per_year = coe_price / 10
-today_date = pd.Timestamp.now().strftime("%d/%m/%Y")
 
-st.sidebar.subheader(f"Price as of {today_date}")
-st.sidebar.metric(label="COE Price", value=f"${coe_price:.2f}")
-st.sidebar.metric(label="Per Month", value=f"${coe_price_per_month:.2f}")
-st.sidebar.metric(label="Per Year", value=f"${coe_price_per_year:.2f}")
+def display_analytics_sidebar():
+    st.sidebar.header("Analytics Summary")
+    st.sidebar.caption("Most price-to-value motorbike found")
+    global sidebar_model, sidebar_posting_id, sidebar_price
+    global sidebar_monthly_depreciation, sidebar_annual_depreciation
+    global sidebar_bike_coe_left, sidebar_link
 
-st.sidebar.header("Analytics Summary")
-st.sidebar.caption("Most price to value motorbike found")
-sidebar_model = st.sidebar.empty()
-sidebar_posting_id = st.sidebar.empty()
-sidebar_price = st.sidebar.empty()
-c, d = st.sidebar.columns(2)
-sidebar_monthly_depreciation = c.empty()
-sidebar_annual_depreciation = d.empty()
-sidebar_bike_coe_left = st.sidebar.empty()
-sidebar_link = st.sidebar.empty()
+    sidebar_model = st.sidebar.empty()
+    sidebar_posting_id = st.sidebar.empty()
+    sidebar_price = st.sidebar.empty()
+    sidebar_depreciation = st.sidebar.columns(2)
+    sidebar_monthly_depreciation = sidebar_depreciation[0].empty()
+    sidebar_annual_depreciation = sidebar_depreciation[1].empty()
+    sidebar_bike_coe_left = st.sidebar.empty()
+    sidebar_link = st.sidebar.empty()
 
-# User Input: Select or Add Brand
-st.subheader("Search for used motorbikes")
-col1, col2 = st.columns(2)
 
-with col1:
-    brand = st.selectbox("Select Brand", options=motorbike_factory.get_all_brands_sorted(), index=0)
-    new_brand = st.text_input("Or Enter a New Brand").title()
-    if new_brand:
-        motorbike_factory.insert_brand(new_brand)
-        brand = new_brand
+# Function to select or add brand and model
+def select_or_add_brand_and_model(motorbike_factory):
+    col1, col2 = st.columns(2)
+    with col1:
+        brand = st.selectbox("Select Brand", options=motorbike_factory.get_all_brands_sorted(), index=0)
+        new_brand = st.text_input("Or Enter a New Brand").title()
+        if new_brand:
+            motorbike_factory.insert_brand(new_brand)
+            brand = new_brand
 
-with col2:
-    model = st.selectbox("Select Model", options=motorbike_factory.get_all_models_sorted(brand), index=0)
-    new_model = st.text_input("Or Enter a New Model").title()
-    if new_model:
-        motorbike_factory.insert_model(brand, new_model)
-        model = new_model
+    with col2:
+        model = st.selectbox("Select Model", options=motorbike_factory.get_all_models_sorted(brand), index=0)
+        new_model = st.text_input("Or Enter a New Model").title()
+        if new_model:
+            motorbike_factory.insert_model(brand, new_model)
+            model = new_model
 
-# Additional search filters with defaults
-col3, col4 = st.columns(2)
+    return brand, model
 
-with col3:
-    price_from = st.text_input("Price From", "0")
 
-with col4:
-    price_to = st.text_input("Price To", "")
+# Function to get search filters
+def get_search_filters():
+    col3, col4 = st.columns(2)
+    with col3:
+        price_from = st.text_input("Price From", "0")
+    with col4:
+        price_to = st.text_input("Price To", "")
 
-license_class = st.selectbox("License Class", ["", "2B", "2A", "2"], index=1)
+    license_class = st.selectbox("License Class", ["", "2B", "2A", "2"], index=1)
 
-col5, col6 = st.columns(2)
+    col5, col6 = st.columns(2)
+    with col5:
+        reg_year_from = st.text_input("Registration Year From", "1970")
+    with col6:
+        reg_year_to = st.text_input("Registration Year To", "2024")
 
-with col5:
-    reg_year_from = st.text_input("Registration Year From", "1970")
+    return {
+        "price_from": price_from,
+        "price_to": price_to,
+        "license_class": license_class,
+        "reg_year_from": reg_year_from,
+        "reg_year_to": reg_year_to
+    }
 
-with col6:
-    reg_year_to = st.text_input("Registration Year To", "2024")
 
-# Search Button
-if st.button("Search"):
+# Function to fetch bike listing URLs
+def fetch_bike_listing_urls(brand, model, filters):
     bike_model_cleaned = f"{brand} {model}".replace(" ", "+")
     bike_listing_urls = []
     page = 1
     while True:
-
         bike_listings_url = BikeURLGenerator.generate(
             bike_model=bike_model_cleaned,
-            price_from=price_from,
-            price_to=price_to,
-            license_class=license_class,
-            reg_year_from=reg_year_from,
-            reg_year_to=reg_year_to,
+            price_from=filters['price_from'],
+            price_to=filters['price_to'],
+            license_class=filters['license_class'],
+            reg_year_from=filters['reg_year_from'],
+            reg_year_to=filters['reg_year_to'],
             status=10,  # Available
             page=page
         )
 
         new_bike_listing_urls = extract_bike_listing_urls(bike_listings_url)
-        if len(new_bike_listing_urls) < 1:
+        if not new_bike_listing_urls:
             break
+        bike_listing_urls.extend(new_bike_listing_urls)
+        page += 1
+
+    return bike_listing_urls
+
+
+# Function to handle no results found
+def handle_no_results(motorbike_factory, brand, model):
+    st.warning("No bikes found with the given criteria.")
+    test_url = BikeURLGenerator.generate(bike_model=f"{brand} {model}".replace(" ", "+"))
+    if not extract_bike_listing_urls(test_url):
+        st.warning(
+            f"We could not find any bikes for {brand} {model}. Consider trying a different model or checking for spacing errors."
+            "e.g MSX125 instead of MSX 125 and ADV 150 instead of ADV150.\n This bike model will be removed from the database"
+        )
+        motorbike_factory.remove_model(brand, model)
+        motorbike_factory.remove_empty_brand(brand)
+
+
+def update_recommended_placeholders(analyzed_bikes, bike_analyzer):
+    """Updates the placeholders for recommended prices for all analyzed bikes."""
+    for bike_data, placeholder_low, placeholder_rec in analyzed_bikes:
+        recommended_low_price, delta_low_price = bike_analyzer.recommend_low_price(bike_data)
+        recommended_middle_price, delta_middle_price = bike_analyzer.recommend_middle_price(bike_data,
+                                                                                            recommended_low_price)
+
+        if delta_low_price < 0:
+            formatted_delta_low_price = f"-${abs(delta_low_price):.2f}"
         else:
-            bike_listing_urls.extend(new_bike_listing_urls)
-            page += 1
+            formatted_delta_low_price = f"${delta_low_price:.2f}"
+
+        # Adjusting delta_middle_price to handle negative values
+        if delta_middle_price < 0:
+            formatted_delta_middle_price = f"-${abs(delta_middle_price):.2f}"
+        else:
+            formatted_delta_middle_price = f"${delta_middle_price:.2f}"
+
+        # Updated code with the adjusted deltas
+        placeholder_low.metric(
+            label="Recommended Low Price",
+            value=f"${recommended_low_price:.2f}",
+            delta=formatted_delta_low_price,
+            delta_color="inverse",
+            help=f"Based on the lowest dealer price found of {bike_analyzer.lowest_dealer_price_seen:.2f}"
+        )
+
+        placeholder_rec.metric(
+            label="Recommended Middle Price",
+            value=f"${recommended_middle_price:.2f}",
+            delta=formatted_delta_middle_price,
+            delta_color="inverse",
+            help="Middle price between the lowest dealer price and the current asking price"
+        )
+
+
+def analyze_bike(url, bike_analyzer):
+    """Analyzes a single bike and returns the bike data along with placeholders for recommendations."""
+    bike_data = bike_analyzer.analyze(url)
+    recommended_low_placeholder, recommended_placeholder = display_bike_analysis(bike_data)
+
+    update_sidebar_if_lowest(bike_data, bike_analyzer.lowest_dealer_price_seen)
+
+    return bike_data, recommended_low_placeholder, recommended_placeholder
+
+
+# Function to display search results
+def display_search_results(bike_listing_urls, bike_analyzer, brand, model):
+    """Displays the search results and analyzes each bike."""
     st.subheader(f"Found {len(bike_listing_urls)} bikes:")
     st.header("Analyzing Bikes...")
+    progress_bar1 = st.progress(0)
     st.caption("Scroll down to see details")
-    progress_bar1 = st.progress(0, text="Fetching all data to plot graphs")
-    # Initialize empty DataFrame for scatter charts
-    scatter_data = pd.DataFrame(columns=["COE Months Left", "Price",
-                                         # "Annual_Depreciation"
-                                         ])
-    depreciation_data = pd.DataFrame(columns=["COE Months Left",
-                                              # "Price",
-                                              "Annual Depreciation", ])
 
-    # Initialize the scatter charts
-    st.subheader("Price over COE left in bikes")
-    scatter_chart = st.scatter_chart(scatter_data,
-                                     use_container_width=True,
-                                     x="COE Months Left",
-                                     y="Price",
-                                     # size="Annual_Depreciation"
-                                     x_label="Amount of COE left(Months)",
-                                     y_label="Price($SGD)"
-                                     )
-
-    st.subheader("Depreciation over COE left in bikes")
-    depreciation_chart = st.scatter_chart(depreciation_data,
-                                          use_container_width=True,
-                                          x="COE Months Left",
-                                          y="Annual Depreciation",
-                                          x_label="Amount of COE left(Months)",
-                                          y_label="Annual Depreciation($SGD)"
-                                          # size="Price"
-                                          )
-
-    if len(bike_listing_urls) == 0:
-        st.warning("No bikes found with the given criteria.")
-        test_url = BikeURLGenerator.generate(
-            bike_model=bike_model_cleaned,
-
-        )
-        test_count = extract_bike_listing_urls(test_url)
-        if len(test_count) < 1:
-            st.warning(
-                f"We could find any bikes for {bike_model_cleaned}, perhaps you should try another model, or the spacing is wrong e.g MSX125 instead of MSX 125 and ADV 150 instead of ADV150.\n This bike model will be removed from the database")
-            motorbike_factory.remove_model(brand, model)
-            motorbike_factory.remove_empty_brand(brand)
-
+    scatter_chart, depreciation_chart = initialize_charts()
     st.title(f"All {brand} {model} analysis")
-    progress_bar = st.progress(0, text="Fetching all data for individual bike analysis below")
-    bike_data_list = []
 
-    lowest_dealer_price = float('inf')
-    lowest_bd = {}
     analyzed_bikes = []
+    progress_bar = st.progress(0)
 
     for i, url in enumerate(bike_listing_urls):
-        bd = bike_analyzer.analyze(url)
-        bike_data_list.append(bd)
+        bike_data, low_placeholder, rec_placeholder = analyze_bike(url, bike_analyzer)
+        analyzed_bikes.append((bike_data, low_placeholder, rec_placeholder))
 
-        # Update lowest dealer price if a new low is found
-        if bd['Dealer'] < lowest_dealer_price:
-            lowest_dealer_price = bd['Dealer']
-            lowest_bd = bd
+        if bike_data["Price"] is not np.nan:
+            update_charts(scatter_chart, depreciation_chart, bike_data)
 
-            sidebar_model.subheader(lowest_bd['Title'])
-            sidebar_price.metric(label="Asking Price", value=f"${lowest_bd['Price']:.2f}")
-            sidebar_monthly_depreciation.metric(label="Monthly Depreciation",
-                                                value=f"${lowest_bd['monthly_depreciation']:.2f}")
-            sidebar_annual_depreciation.metric(label="Annual Depreciation",
-                                               value=f"${lowest_bd['annual_depreciation']:.2f}")
-            sidebar_bike_coe_left.metric(label="COE Left", value=lowest_bd['Years & Months Left'])
-            sidebar_link.markdown(f"[SGBike Mart Listing]({lowest_bd['URL']})")
-            sidebar_posting_id.caption(f"Listing ID: {lowest_bd['URL'].split('/')[-2]}")
-
-        if bd["Price"] is not np.nan:
-            # Add new row to scatter data (Delta DataFrame)
-            new_scatter_data = pd.DataFrame({
-                "COE Months Left": [float(bd['Total Months Left'])],
-                "Price": [bd['Price']],
-                # "Annual_Depreciation": [bd['annual_depreciation']]
-            })
-
-            scatter_chart.add_rows(new_scatter_data.set_index("COE Months Left"))
-
-            # Add new row to depreciation data (Delta DataFrame)
-            new_depreciation_data = pd.DataFrame({
-                "COE Months Left": [float(bd['Total Months Left'])],
-                # "Price": [bd['Price']],
-                "Annual Depreciation": [bd['annual_depreciation']],
-
-            })
-
-            depreciation_chart.add_rows(new_depreciation_data.set_index("COE Months Left"))
-
-        placeholder_low, placeholder_rec = display_bike_analysis(bd)
-        analyzed_bikes.append((bd, placeholder_low, placeholder_rec))
-        progress_bar.progress((i + 1) / len(bike_listing_urls))
-        progress_bar1.progress((i + 1) / len(bike_listing_urls))
-        time.sleep(0.05)  # Just for demonstration of real-time fetching
-
-        for analyzed_bike in analyzed_bikes:
-            bd, placeholder_low, placeholder_rec = analyzed_bike
-            try:
-                recommended_low_price = lowest_dealer_price / bd['Dealer'] * bd['Price']
-                recommended_middle_price = (recommended_low_price + bd['Price']) / 2
-                delta_low_price = recommended_low_price - bd['Price']
-                delta_middle_price = recommended_middle_price - bd['Price']
-            except:
-                monthly_depreciations = [b["monthly_depreciation"] for b in bike_data_list if
-                                         b["monthly_depreciation"] is not np.nan]
-                average_monthly_depreciation = np.mean(monthly_depreciations)
-                recommended_middle_price = (bd['Total Months Left'] * average_monthly_depreciation)
-                recommended_low_price = (lowest_dealer_price + recommended_middle_price) / 2
-                delta_low_price = delta_middle_price = np.nan
-
-            placeholder_low.metric(label="Recommended Low Price", value=f"${recommended_low_price:.2f}",
-                                   delta=delta_low_price, delta_color="inverse",
-                                   help="Based on the lowest dealer price found of {lowest_dealer_price:.2f}")
-            placeholder_rec.metric(label="Recommended Middle Price:", value=f"${recommended_middle_price:.2f}",
-                                   delta=delta_middle_price, delta_color="inverse",
-                                   help="Middle price between the lowest dealer price and the current asking price")
+        # Should be updated during the analyzing for loop
+        # To create a real-time updating app
+        update_recommended_placeholders(analyzed_bikes, bike_analyzer)
+        progress_bar.progress((i + 1) / len(bike_listing_urls), text=f"{i + 1}/{len(bike_listing_urls)} bikes fetched")
+        progress_bar1.progress((i + 1) / len(bike_listing_urls), text=f"{i + 1}/{len(bike_listing_urls)} bikes fetched")
+        time.sleep(0.05)
 
     st.success("All bike details fetched and displayed.")
     st.info("You can now select another bike to analyze.")
-    st.info(f"Scraped the following links {bike_listings_url}")
-    st.table(bike_listing_urls)
+
+
+# Function to initialize charts
+def initialize_charts():
+    scatter_data = pd.DataFrame(columns=["COE Months Left", "Price"])
+    depreciation_data = pd.DataFrame(columns=["COE Months Left", "Annual Depreciation"])
+
+    st.subheader("Price over COE left in bikes")
+    scatter_chart = st.scatter_chart(scatter_data, use_container_width=True,
+                                     x="COE Months Left", y="Price")
+
+    st.subheader("Depreciation over COE left in bikes")
+    depreciation_chart = st.scatter_chart(depreciation_data, use_container_width=True,
+                                          x="COE Months Left", y="Annual Depreciation")
+
+    return scatter_chart, depreciation_chart
+
+
+# Function to update sidebar if lowest price found
+def update_sidebar_if_lowest(bd, lowest_dealer_price):
+    global sidebar_model, sidebar_posting_id, sidebar_price
+    global sidebar_monthly_depreciation, sidebar_annual_depreciation
+    global sidebar_bike_coe_left, sidebar_link
+
+    current_dealer_price = bd['Dealer']
+    if current_dealer_price <= lowest_dealer_price:
+        sidebar_model.subheader(bd['Title'])
+        sidebar_price.metric(label="Asking Price", value=f"${bd['Price']:.2f}")
+        sidebar_monthly_depreciation.metric(label="Monthly Depreciation", value=f"${bd['monthly_depreciation']:.2f}")
+        sidebar_annual_depreciation.metric(label="Annual Depreciation", value=f"${bd['annual_depreciation']:.2f}")
+        sidebar_bike_coe_left.metric(label="COE Left", value=bd['Years & Months Left'])
+        sidebar_link.markdown(f"[SGBike Mart Listing]({bd['URL']})")
+        sidebar_posting_id.caption(f"Listing ID: {bd['URL'].split('/')[-2]}")
+
+
+# Function to update charts
+def update_charts(scatter_chart, depreciation_chart, bd):
+    new_scatter_data = pd.DataFrame({
+        "COE Months Left": [float(bd['Total Months Left'])],
+        "Price": [bd['Price']]
+    })
+    scatter_chart.add_rows(new_scatter_data.set_index("COE Months Left"))
+
+    new_depreciation_data = pd.DataFrame({
+        "COE Months Left": [float(bd['Total Months Left'])],
+        "Annual Depreciation": [bd['annual_depreciation']]
+    })
+    depreciation_chart.add_rows(new_depreciation_data.set_index("COE Months Left"))
+
+
+def main():
+    # Streamlit app title and subtitle
+    st.title("Used Motorbikes Scanner")
+    st.caption("For TechOverflow (A 1 hour hackathon by Din)")
+    motorbike_factory = DatabaseFactory()
+    bike_analyzer = BikeAnalyzer(DepreciationStrategy(), PriceProjectionStrategy())
+    # Sidebar: Display COE Price
+    display_coe_price_sidebar()
+
+    # Sidebar: Analytics Summary
+    display_analytics_sidebar()
+
+    # User Input: Select or Add Brand and Model
+    brand, model = select_or_add_brand_and_model(motorbike_factory)
+
+    # Additional search filters with defaults
+    filters = get_search_filters()
+
+    # Search Button
+    if st.button("Search"):
+        bike_listing_urls = fetch_bike_listing_urls(brand, model, filters)
+
+        if not bike_listing_urls:
+            handle_no_results(motorbike_factory, brand, model)
+        else:
+            display_search_results(bike_listing_urls, bike_analyzer, brand, model)
+
+
+if __name__ == "__main__":
+    main()
