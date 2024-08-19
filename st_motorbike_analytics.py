@@ -564,28 +564,9 @@ def display_price_data(bike_data):
         with st.expander("Show Monthly Price Data"):
             monthly_df = pd.DataFrame.from_dict(bike_data["monthly_price_data"], orient='index', columns=["Price"])
             st.dataframe(monthly_df)
-
-            st.subheader("Monthly Price Over Time")
-            plt.figure(figsize=(10, 4))
-            plt.plot(monthly_df.index, monthly_df["Price"], marker='o')
-            plt.xlabel("Date")
-            plt.ylabel("Price")
-            plt.title("Monthly Price Over Time")
-            plt.xticks(rotation=45)
-            st.pyplot(plt)
-
         with st.expander("Show Yearly Price Data"):
             yearly_df = pd.DataFrame.from_dict(bike_data["yearly_price_data"], orient='index', columns=["Price"])
             st.dataframe(yearly_df)
-
-            st.subheader("Yearly Price Over Time")
-            plt.figure(figsize=(10, 4))
-            plt.plot(yearly_df.index, yearly_df["Price"], marker='o', color='orange')
-            plt.xlabel("Date")
-            plt.ylabel("Price")
-            plt.title("Yearly Price Over Time")
-            plt.xticks(rotation=45)
-            st.pyplot(plt)
 
 
 async def display_bike_analysis(session, bike_data):
