@@ -330,13 +330,13 @@ def display_bike_analysis(bike_data):
     # Highlighted metrics: Annual and Monthly Depreciation
     col1, col2 = st.columns(2)
     with col1:
-        st.metric(label="Annual Depreciation", value=f"${bike_data['annual_depreciation']:.2f}")
+        st.metric(label="Analytics: Annual Depreciation", value=f"${bike_data['annual_depreciation']:.2f}")
     with col2:
-        st.metric(label="Monthly Depreciation", value=f"${bike_data['monthly_depreciation']:.2f}")
+        st.metric(label="Analytics: Monthly Depreciation", value=f"${bike_data['monthly_depreciation']:.2f}")
 
     # Dealer's Assumed Bike Original Value
     col3, col4 = st.columns(2)
-    col3.metric(label=f"Dealer's Assumed Bike Original Value", value=f"${bike_data['Dealer']:.2f}")
+    col3.metric(label=f"Analytics: Dealer's Assumed Original Value", value=f"${bike_data['Dealer']:.2f}")
     col3.caption("Assumed bike if new price, compare with what you know it costs if you buy new")
     col3.caption("If this difference is too high, it means the used price might be overpriced.")
     col4.metric(label="Current Asking Price:", value=f"${bike_data['Price']:.2f}")
@@ -345,10 +345,13 @@ def display_bike_analysis(bike_data):
     col4.caption("e.g New costs 15k, but dealer assumed value is 18k,= 17% difference, so deduct 17% from asking price.")
 
     # Placeholder for recommended price and low price
-    st.subheader("Analytics")
-    recommended_low_price_placeholder = st.empty()
-    recommended_price_placeholder = st.empty()
+    st.subheader("Analytics: Recommended Price Ranges")
+    col5, col6 = st.columns(2)
+    st.caption("This analysis will update as you fetch more data!")
+    recommended_low_price_placeholder = col5.empty()
+    recommended_price_placeholder = col6.empty()
 
+    st.subheader("Bike information")
 
     # Bike Details in a Table
     details_data = {
@@ -481,6 +484,7 @@ if st.button("Search"):
     bike_data_list = []
 
     lowest_dealer_price = float('inf')
+    analyzed_bikes = []
 
     for i, url in enumerate(bike_listing_urls):
         bd = analyze_used_bike(url)
@@ -490,9 +494,19 @@ if st.button("Search"):
         if bd['Dealer'] < lowest_dealer_price:
             lowest_dealer_price = bd['Dealer']
 
-        display_bike_analysis(bd)
+        placeholder_low, placeholder_rec = display_bike_analysis(bd)
+        analyzed_bikes.append((bd, placeholder_low, placeholder_rec))
         progress_bar.progress((i + 1) / len(bike_listing_urls))
-        time.sleep(0.1)  # Just for demonstration of real-time fetching
+        time.sleep(0.05)  # Just for demonstration of real-time fetching
+
+        for analyzed_bike in analyzed_bikes:
+            bd, placeholder_low, placeholder_rec = analyzed_bike
+            recommended_low_price = lowest_dealer_price / bd['Dealer'] * bd['Price']
+            recommended_middle_price = (recommended_low_price + bd['Price']) / 2
+
+            placeholder_low.metric(label="Recommended Low Price", value=f"${recommended_low_price:.2f}", delta=f"{recommended_low_price - bd['Price']}" , delta_color="inverse")
+            placeholder_rec.metric(label="Recommended Middle Price:", value=f"${recommended_middle_price:.2f}", delta=f"{recommended_middle_price - bd['Price']}" , delta_color="inverse")
+
 
     st.success("All bike details fetched and displayed.")
     st.info("You can now select another bike to analyze.")
