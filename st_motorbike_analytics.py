@@ -482,7 +482,7 @@ def display_bike_title_and_links(bike_data):
     st.title(title)
 
     col1, col2 = st.columns(2)
-    listing_id = bike_data["URL"].split("/")[-2]
+    listing_id = BikeAnalyzer.extract_sgbikemart_id(bike_data["URL"])
     col1.caption(f"SGBike Mart Listing ID: {listing_id}")
     col2.markdown(f"[SGBike Mart Listing]({bike_data['URL']})")
 
@@ -834,7 +834,7 @@ def update_sidebar_if_lowest(bd, lowest_dealer_price, sidebar_data):
                                                            value=f"${bd['annual_depreciation']:.2f}")
         sidebar_data['sidebar_bike_coe_left'].metric(label="COE Left", value=bd['Years & Months Left'])
         sidebar_data['sidebar_link'].markdown(f"[SGBike Mart Listing]({bd['URL']})")
-        sidebar_data['sidebar_posting_id'].caption(f"Listing ID: {BikeAnalyzer.extract_sgbikemart_id(['URL'])}")
+        sidebar_data['sidebar_posting_id'].caption(f"Listing ID: {BikeAnalyzer.extract_sgbikemart_id(bd['URL'])}")
 
     return sidebar_data
 
