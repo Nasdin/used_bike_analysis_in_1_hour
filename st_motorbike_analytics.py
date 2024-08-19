@@ -8,6 +8,7 @@ from datetime import datetime
 from urllib.parse import urljoin
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import requests
 import streamlit as st
@@ -47,6 +48,9 @@ def calculate_depreciation(price, total_months_left):
     if total_months_left == 'N/A' or total_months_left <= 0:
         return {'annual_depreciation': 'N/A', 'monthly_depreciation': 'N/A'}
 
+    if price is np.nan:
+        return {'annual_depreciation': 'N/A', 'monthly_depreciation': 'N/A'}
+
     # Calculate depreciated value at the end of COE (10% of initial price)
     end_value = price * 0.10
 
@@ -74,10 +78,14 @@ def split_currency_value(amount_str):
     # Split the string into currency and value
     currency = amount_str[:i].strip()
     currency = re.sub(r'[^A-Za-z]', '', currency)  # Remove any non-letter characters (like $)
+    try:
+        value = amount_str[i:].replace(",", "").strip()  # Removing commas if any
+        value = ''.join(filter(str.isdigit, value))
+        value=float(value)
+    except:
+        value = np.nan
 
-    value = amount_str[i:].replace(",", "").strip()  # Removing commas if any
-
-    return {"Currency": currency, "Price": float(value)}
+    return {"Currency": currency, "Price":value}
 
 
 def extract_bike_info(url):
@@ -161,7 +169,10 @@ def project_vehicle_price(registration_date, coe_expiry_date, current_price, mon
                                               current_date.year - registration_date.year) * 12 + current_date.month - registration_date.month
 
     # Calculate the original price at the registration date
-    original_price = current_price + (total_months_since_registration * monthly_depreciation)
+    try:
+        original_price = current_price + (total_months_since_registration * monthly_depreciation)
+    except TypeError:
+        return [np.nan], [np.nan]
 
     # Create a dictionary to store projected prices for each month
     monthly_prices = {}
@@ -207,9 +218,14 @@ def analyze_used_bike(url):
                                                           bike_info["Price"], bike_depreciation["monthly_depreciation"])
 
     # Adds the starting price of the monthly_prices into the bike info as the dealer's assumed bike value
-    bike_info["Dealer"] = list(monthly_prices.values())[0]
-    bike_info["monthly_price_data"] = monthly_prices
-    bike_info["yearly_price_data"] = yearly_prices
+    try:
+        bike_info["Dealer"] = list(monthly_prices.values())[0]
+        bike_info["monthly_price_data"] = monthly_prices
+        bike_info["yearly_price_data"] = yearly_prices
+    except AttributeError:
+        bike_info["Dealer"] = np.nan
+        bike_info["monthly_price_data"] = np.nan
+        bike_info["yearly_price_data"] = np.nan
 
     return bike_info
 
@@ -468,18 +484,18 @@ def display_bike_analysis(bike_data):
     # Highlighted metrics: Annual and Monthly Depreciation
     col1, col2 = st.columns(2)
     with col1:
-        st.metric(label="Analytics: Annual Depreciation", value=f"${bike_data['annual_depreciation']:.2f}",
+        st.metric(label="Analytics: Annual Depreciation", value=f"${bike_data['annual_depreciation']}",
                   help="Estimated based on the bike becoming 10% of its value at end of COE")
     with col2:
-        st.metric(label="Analytics: Monthly Depreciation", value=f"${bike_data['monthly_depreciation']:.2f}",
+        st.metric(label="Analytics: Monthly Depreciation", value=f"${bike_data['monthly_depreciation']}",
                   help="The 'True' cost of your bike every month, as it will become close to worthless at end of its COE lifespan")
 
     # Dealer's Assumed Bike Original Value
     col3, col4 = st.columns(2)
-    col3.metric(label=f"Analytics: Dealer's Assumed Original Value", value=f"${bike_data['Dealer']:.2f}",
+    col3.metric(label=f"Analytics: Dealer's Assumed Original Value", value=f"${bike_data['Dealer']}",
                 help="What the dealer is pricing it at if its new, you should compare with the actual new price")
 
-    col4.metric(label="Current Asking Price:", value=f"${bike_data['Price']:.2f}",
+    col4.metric(label="Current Asking Price:", value=f"${bike_data['Price']}",
                 help="You should deduct the asking price based on the % difference between brand new vs dealer's assumed value.")
     st.caption(
         "If dealer is charging much more than what it costs new, you should deduct the difference from the asking price.")
@@ -513,34 +529,35 @@ def display_bike_analysis(bike_data):
     details_df = pd.DataFrame(details_data.items(), columns=["Attribute", "Value"])
     st.table(details_df)
 
-    # Expandable DataFrames for Monthly and Yearly Price Data
-    with st.expander("Show Monthly Price Data"):
-        monthly_df = pd.DataFrame.from_dict(bike_data["monthly_price_data"], orient='index', columns=["Price"])
-        st.dataframe(monthly_df)
+    if bike_data['Price'] is not np.nan:
+        # Expandable DataFrames for Monthly and Yearly Price Data
+        with st.expander("Show Monthly Price Data"):
+            monthly_df = pd.DataFrame.from_dict(bike_data["monthly_price_data"], orient='index', columns=["Price"])
+            st.dataframe(monthly_df)
 
-        # Plotting the time series
-        st.subheader("Monthly Price Over Time")
-        plt.figure(figsize=(10, 4))
-        plt.plot(monthly_df.index, monthly_df["Price"], marker='o')
-        plt.xlabel("Date")
-        plt.ylabel("Price")
-        plt.title("Monthly Price Over Time")
-        plt.xticks(rotation=45)
-        st.pyplot(plt)
+            # Plotting the time series
+            st.subheader("Monthly Price Over Time")
+            plt.figure(figsize=(10, 4))
+            plt.plot(monthly_df.index, monthly_df["Price"], marker='o')
+            plt.xlabel("Date")
+            plt.ylabel("Price")
+            plt.title("Monthly Price Over Time")
+            plt.xticks(rotation=45)
+            st.pyplot(plt)
 
-    with st.expander("Show Yearly Price Data"):
-        yearly_df = pd.DataFrame.from_dict(bike_data["yearly_price_data"], orient='index', columns=["Price"])
-        st.dataframe(yearly_df)
+        with st.expander("Show Yearly Price Data"):
+            yearly_df = pd.DataFrame.from_dict(bike_data["yearly_price_data"], orient='index', columns=["Price"])
+            st.dataframe(yearly_df)
 
-        # Plotting the time series
-        st.subheader("Yearly Price Over Time")
-        plt.figure(figsize=(10, 4))
-        plt.plot(yearly_df.index, yearly_df["Price"], marker='o', color='orange')
-        plt.xlabel("Date")
-        plt.ylabel("Price")
-        plt.title("Yearly Price Over Time")
-        plt.xticks(rotation=45)
-        st.pyplot(plt)
+            # Plotting the time series
+            st.subheader("Yearly Price Over Time")
+            plt.figure(figsize=(10, 4))
+            plt.plot(yearly_df.index, yearly_df["Price"], marker='o', color='orange')
+            plt.xlabel("Date")
+            plt.ylabel("Price")
+            plt.title("Yearly Price Over Time")
+            plt.xticks(rotation=45)
+            st.pyplot(plt)
 
     return recommended_low_price_placeholder, recommended_price_placeholder
 
@@ -636,8 +653,37 @@ if st.button("Search"):
             bike_listing_urls.extend(new_bike_listing_urls)
             page += 1
     st.subheader(f"Found {len(bike_listing_urls)} bikes:")
-    st.header("Analyzing Bikes Heatmap")
-    analytics_plot = st.empty()
+    st.header("Analyzing Bikes...")
+    st.caption("Scroll down to see details")
+    # Initialize empty DataFrame for scatter charts
+    scatter_data = pd.DataFrame(columns=["COE Months Left", "Price",
+                                         # "Annual_Depreciation"
+                                         ])
+    depreciation_data = pd.DataFrame( columns=["COE Months Left",
+                                              # "Price",
+                                              "Annual Depreciation", ])
+
+
+    # Initialize the scatter charts
+    st.subheader("Price over COE left in bikes")
+    scatter_chart = st.scatter_chart(scatter_data,
+                                     use_container_width=True,
+                                     x="COE Months Left",
+                                     y="Price",
+                                     # size="Annual_Depreciation"
+                                     x_label="Amount of COE left(Months)",
+                                     y_label="Price($SGD)"
+                                     )
+
+    st.subheader("Depreciation over COE left in bikes")
+    depreciation_chart = st.scatter_chart(depreciation_data,
+                                          use_container_width=True,
+                                          x="COE Months Left",
+                                          y="Annual Depreciation",
+                                          x_label="Amount of COE left(Months)",
+                                          y_label="Annual Depreciation($SGD)"
+                                          # size="Price"
+                                          )
 
     if len(bike_listing_urls) == 0:
         st.warning("No bikes found with the given criteria.")
@@ -678,6 +724,27 @@ if st.button("Search"):
             sidebar_link.markdown(f"[SGBike Mart Listing]({lowest_bd['URL']})")
             sidebar_posting_id.caption(f"Listing ID: {lowest_bd['URL'].split('/')[-2]}")
 
+        if bd["Price"] is not np.nan:
+
+            # Add new row to scatter data (Delta DataFrame)
+            new_scatter_data = pd.DataFrame({
+                "COE Months Left": [float(bd['Total Months Left'])],
+                "Price": [bd['Price']],
+                # "Annual_Depreciation": [bd['annual_depreciation']]
+            })
+
+            scatter_chart.add_rows(new_scatter_data.set_index("COE Months Left") )
+
+            # Add new row to depreciation data (Delta DataFrame)
+            new_depreciation_data = pd.DataFrame({
+                "COE Months Left": [float(bd['Total Months Left'])],
+                # "Price": [bd['Price']],
+                "Annual Depreciation": [bd['annual_depreciation']],
+
+            })
+
+            depreciation_chart.add_rows(new_depreciation_data.set_index("COE Months Left"))
+
         placeholder_low, placeholder_rec = display_bike_analysis(bd)
         analyzed_bikes.append((bd, placeholder_low, placeholder_rec))
         progress_bar.progress((i + 1) / len(bike_listing_urls))
@@ -685,14 +752,20 @@ if st.button("Search"):
 
         for analyzed_bike in analyzed_bikes:
             bd, placeholder_low, placeholder_rec = analyzed_bike
-            recommended_low_price = lowest_dealer_price / bd['Dealer'] * bd['Price']
-            recommended_middle_price = (recommended_low_price + bd['Price']) / 2
+            try:
+                recommended_low_price = lowest_dealer_price / bd['Dealer'] * bd['Price']
+                recommended_middle_price = (recommended_low_price + bd['Price']) / 2
+                delta_low_price = recommended_low_price - bd['Price']
+                delta_middle_price = recommended_middle_price - bd['Price']
+            except:
+                recommended_low_price = recommended_middle_price = np.nan
+                delta_low_price = delta_middle_price = np.nan
 
             placeholder_low.metric(label="Recommended Low Price", value=f"${recommended_low_price:.2f}",
-                                   delta=f"{recommended_low_price - bd['Price']}", delta_color="inverse",
+                                   delta=delta_low_price, delta_color="inverse",
                                    help="Based on the lowest dealer price found of {lowest_dealer_price:.2f}")
             placeholder_rec.metric(label="Recommended Middle Price:", value=f"${recommended_middle_price:.2f}",
-                                   delta=f"{recommended_middle_price - bd['Price']}", delta_color="inverse",
+                                   delta=delta_middle_price, delta_color="inverse",
                                    help="Middle price between the lowest dealer price and the current asking price")
 
     st.success("All bike details fetched and displayed.")
