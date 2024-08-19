@@ -687,8 +687,10 @@ def handle_no_results(motorbike_factory, brand, model):
             f"We could not find any bikes for {brand} {model}. Consider trying a different model or checking for spacing errors."
             "e.g MSX125 instead of MSX 125 and ADV 150 instead of ADV150.\n This bike model will be removed from the database"
         )
-        motorbike_factory.remove_model(brand, model)
-        motorbike_factory.remove_empty_brand(brand)
+        if model:
+            motorbike_factory.remove_model(brand, model)
+        if brand:
+            motorbike_factory.remove_empty_brand(brand)
 
 
 def update_recommended_placeholders(analyzed_bikes, bike_analyzer):
