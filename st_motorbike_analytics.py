@@ -15,58 +15,44 @@ import streamlit as st
 from PIL import Image
 from bs4 import BeautifulSoup
 
-st.set_page_config(page_title="Used Motorbike Price Analyser", page_icon="🏍️")
+st.set_page_config(page_title="Used Motorbike Price Analyser", page_icon="🏍️", menu_items={
+    "About": "This is a simple app to analyze used motorbike prices from SGBikeMart. It was built within an hour, and then fixed over 3 hours. By Din. https://github.com/Nasdin/used_bike_analysis_in_1_hour",
+    "Report a Bug": "https://github.com/Nasdin/used_bike_analysis_in_1_hour"})
 
 
-def generate_used_bike_search_url(
-        bike_model="Honda",
-        bike_type="",
-        price_from="",
-        price_to="",
-        license_class="2B",
-        reg_year_from="1970",
-        reg_year_to="2024",
-        monthly_from="",
-        monthly_to="",
-        user="",
-        status="50",
-        category="",
-        page=1
-):
-    base_url = "https://sgbikemart.com.sg/listing/usedbikes/listing/"
-    query_params = (
-        f"?page={page}&bike_model={bike_model}&bike_type={bike_type}&price_from={price_from}"
-        f"&price_to={price_to}&license_class={license_class}&reg_year_from={reg_year_from}"
-        f"&reg_year_to={reg_year_to}&monthly_from={monthly_from}&monthly_to={monthly_to}"
-        f"&user={user}&status={status}&category={category}"
-    )
-    return base_url + query_params
+class BikeURLGenerator:
+    @staticmethod
+    def generate(bike_model="Honda", bike_type="", price_from="", price_to="", license_class="2B",
+                 reg_year_from="1970", reg_year_to="2024", monthly_from="", monthly_to="",
+                 user="", status=10, category="", page=1):
+        base_url = "https://sgbikemart.com.sg/listing/usedbikes/listing/"
+        query_params = (
+            f"?page={page}&bike_model={bike_model}&bike_type={bike_type}&price_from={price_from}"
+            f"&price_to={price_to}&license_class={license_class}&reg_year_from={reg_year_from}"
+            f"&reg_year_to={reg_year_to}&monthly_from={monthly_from}&monthly_to={monthly_to}"
+            f"&user={user}&status={status}&category={category}"
+        )
+        return base_url + query_params
 
 
-def calculate_depreciation(price, total_months_left):
-    # If there are no remaining months, return 'N/A'
-    if total_months_left == 'N/A' or total_months_left <= 0:
-        return {'annual_depreciation': 'N/A', 'monthly_depreciation': 'N/A'}
+class DepreciationStrategy:
+    @staticmethod
+    def calculate(price, total_months_left):
+        if total_months_left == 'N/A' or total_months_left <= 0:
+            return {'annual_depreciation': 'N/A', 'monthly_depreciation': 'N/A'}
 
-    if price is np.nan:
-        return {'annual_depreciation': 'N/A', 'monthly_depreciation': 'N/A'}
+        if price is np.nan:
+            return {'annual_depreciation': 'N/A', 'monthly_depreciation': 'N/A'}
 
-    # Calculate depreciated value at the end of COE (10% of initial price)
-    end_value = price * 0.10
+        end_value = price * 0.10
+        total_depreciation = price - end_value
+        monthly_depreciation = total_depreciation / total_months_left
+        annual_depreciation = monthly_depreciation * 12
 
-    # Calculate total depreciation amount (price reduction needed)
-    total_depreciation = price - end_value
-
-    # Calculate monthly depreciation
-    monthly_depreciation = total_depreciation / total_months_left
-
-    # Calculate annual depreciation
-    annual_depreciation = monthly_depreciation * 12
-
-    return {
-        'annual_depreciation': annual_depreciation,
-        'monthly_depreciation': monthly_depreciation
-    }
+        return {
+            'annual_depreciation': annual_depreciation,
+            'monthly_depreciation': monthly_depreciation
+        }
 
 
 def split_currency_value(amount_str):
@@ -81,153 +67,150 @@ def split_currency_value(amount_str):
     try:
         value = amount_str[i:].replace(",", "").strip()  # Removing commas if any
         value = ''.join(filter(str.isdigit, value))
-        value=float(value)
+        value = float(value)
     except:
         value = np.nan
 
-    return {"Currency": currency, "Price":value}
+    return {"Currency": currency, "Price": value}
 
 
-def extract_bike_info(url):
-    response = requests.get(url)
-    soup = BeautifulSoup(response.content, 'html.parser')
+class BikeAnalyzer:
+    def __init__(self, depreciation_strategy, projection_strategy):
+        self.depreciation_strategy = depreciation_strategy
+        self.projection_strategy = projection_strategy
 
-    # Extracting information
-    title = soup.find('h2', class_='card-title').text.strip()
-    price = soup.find('h2', class_='text-center strong').text.strip()
+    def analyze(self, url):
+        bike_info = self._extract_bike_info(url)
+        bike_depreciation = self.depreciation_strategy.calculate(bike_info["Price"], bike_info['Total Months Left'])
+        bike_info.update(bike_depreciation)
 
-    # Details Table
-    details_table = soup.find('table', class_='table mb-0')
-    details = {}
-    for row in details_table.find_all('tr'):
-        key = row.find('td', class_='name').text.strip()
-        value = row.find('td', class_='value').text.strip()
-        details[key] = value
+        monthly_prices, yearly_prices = self.projection_strategy.project(
+            bike_info["Registration Date"], bike_info["COE Expiry Date"],
+            bike_info["Price"], bike_depreciation["monthly_depreciation"]
+        )
 
-    # Extracting specific details
-    brand = details.get('Brand', 'N/A')
-    model = details.get('Model', 'N/A')
-    engine_capacity = details.get('Engine Capacity', 'N/A')
-    classification = details.get('Classification', 'N/A')
-    registration_date = details.get('Registration Date', 'N/A')
-    coe_expiry_date = details.get('COE Expiry Date', 'N/A')
-    vehicle_type = details.get('Type of Vehicle', 'N/A')
+        try:
+            bike_info["Dealer"] = list(monthly_prices.values())[0]
+            bike_info["monthly_price_data"] = monthly_prices
+            bike_info["yearly_price_data"] = yearly_prices
+        except AttributeError:
+            bike_info["Dealer"] = np.nan
+            bike_info["monthly_price_data"] = np.nan
+            bike_info["yearly_price_data"] = np.nan
 
-    # Calculating remaining COE
-    if coe_expiry_date != 'N/A':
-        coe_expiry_date_clean = coe_expiry_date.split()[0]
-        coe_expiry_date_obj = datetime.strptime(coe_expiry_date_clean, '%d/%m/%Y')
-        today = datetime.today()
-        remaining_time = coe_expiry_date_obj - today
-        remaining_years = remaining_time.days // 365
-        remaining_months = (remaining_time.days % 365) // 30
-        total_remaining_months = remaining_time.days / 30
-    else:
-        remaining_years = remaining_months = total_remaining_months = 'N/A'
+        return bike_info
 
-    # Extracting description
-    description_div = soup.find('div', class_='listing-details')
-    description = description_div.text.strip() if description_div else 'N/A'
+    @staticmethod
+    def _extract_bike_info(url):
+        # Same as your extract_bike_info function implementation
+        response = requests.get(url)
+        soup = BeautifulSoup(response.content, 'html.parser')
 
-    # Extracting the bike image URL
-    image_div = soup.find('div', class_='slider-item')
-    image_style = image_div.get('style') if image_div else ''
-    image_url = ''
-    if image_style:
-        image_url = image_style.split("url('")[1].split("')")[0]
+        # Extracting information
+        title = soup.find('h2', class_='card-title').text.strip()
+        price = soup.find('h2', class_='text-center strong').text.strip()
 
-    # Creating the dictionary with the extracted information
-    bike_info = {
-        "Title": title,
-        "Brand": brand,
-        "Model": model,
-        "Engine Capacity": engine_capacity,
-        "Classification": classification,
-        "Registration Date": registration_date,
-        "COE Expiry Date": coe_expiry_date,
-        "Total Months Left": total_remaining_months,
-        "Years & Months Left": f"{remaining_years} years, {remaining_months} months",
-        "Type of Vehicle": vehicle_type,
-        "Description": description,
-        "Image URL": image_url,
-        "URL": url
-    }
-    bike_info.update(split_currency_value(price))
+        # Details Table
+        details_table = soup.find('table', class_='table mb-0')
+        details = {}
+        for row in details_table.find_all('tr'):
+            key = row.find('td', class_='name').text.strip()
+            value = row.find('td', class_='value').text.strip()
+            details[key] = value
 
-    # Returning the dictionary
-    return bike_info
+        # Extracting specific details
+        brand = details.get('Brand', 'N/A')
+        model = details.get('Model', 'N/A')
+        engine_capacity = details.get('Engine Capacity', 'N/A')
+        classification = details.get('Classification', 'N/A')
+        registration_date = details.get('Registration Date', 'N/A')
+        coe_expiry_date = details.get('COE Expiry Date', 'N/A')
+        vehicle_type = details.get('Type of Vehicle', 'N/A')
 
+        # Calculating remaining COE
+        if coe_expiry_date != 'N/A':
+            coe_expiry_date_clean = coe_expiry_date.split()[0]
+            coe_expiry_date_obj = datetime.strptime(coe_expiry_date_clean, '%d/%m/%Y')
+            today = datetime.today()
+            remaining_time = coe_expiry_date_obj - today
+            remaining_years = remaining_time.days // 365
+            remaining_months = (remaining_time.days % 365) // 30
+            total_remaining_months = remaining_time.days / 30
+        else:
+            remaining_years = remaining_months = total_remaining_months = 'N/A'
 
-def project_vehicle_price(registration_date, coe_expiry_date, current_price, monthly_depreciation):
-    # Convert registration and COE expiry dates to datetime objects
-    registration_date = datetime.strptime(registration_date, '%d/%m/%Y')
-    coe_expiry_date = datetime.strptime(coe_expiry_date.split()[0], '%d/%m/%Y')
+        # Extracting description
+        description_div = soup.find('div', class_='listing-details')
+        description = description_div.text.strip() if description_div else 'N/A'
 
-    # Calculate the number of months the vehicle has already depreciated
-    current_date = datetime.today()
-    total_months_since_registration = (
-                                              current_date.year - registration_date.year) * 12 + current_date.month - registration_date.month
+        # Extracting the bike image URL
+        image_div = soup.find('div', class_='slider-item')
+        image_style = image_div.get('style') if image_div else ''
+        image_url = ''
+        if image_style:
+            image_url = image_style.split("url('")[1].split("')")[0]
 
-    # Calculate the original price at the registration date
-    try:
-        original_price = current_price + (total_months_since_registration * monthly_depreciation)
-    except TypeError:
-        return [np.nan], [np.nan]
+        # Creating the dictionary with the extracted information
+        bike_info = {
+            "Title": title,
+            "Brand": brand,
+            "Model": model,
+            "Engine Capacity": engine_capacity,
+            "Classification": classification,
+            "Registration Date": registration_date,
+            "COE Expiry Date": coe_expiry_date,
+            "Total Months Left": total_remaining_months,
+            "Years & Months Left": f"{remaining_years} years, {remaining_months} months",
+            "Type of Vehicle": vehicle_type,
+            "Description": description,
+            "Image URL": image_url,
+            "URL": url
+        }
+        bike_info.update(split_currency_value(price))
 
-    # Create a dictionary to store projected prices for each month
-    monthly_prices = {}
-    yearly_prices = {}
-
-    # Iterate month by month from the registration date to the COE expiry date (inclusive)
-    current_price = original_price
-    current_date = registration_date
-    while current_date <= coe_expiry_date:
-        date_str = current_date.strftime('%d/%m/%Y')
-        monthly_prices[date_str] = current_price
-
-        # Add price to yearly_prices only if it's the first month of the year or the COE expiry date
-        if current_date.month == registration_date.month or current_date == coe_expiry_date:
-            yearly_prices[date_str] = current_price
-
-        # Deduct the monthly depreciation
-        current_price -= monthly_depreciation
-
-        # Move to the next month
-        next_month = current_date.month + 1 if current_date.month < 12 else 1
-        next_year = current_date.year + 1 if current_date.month == 12 else current_date.year
-        max_day_in_month = calendar.monthrange(next_year, next_month)[1]
-
-        # Adjust the day if it is out of range
-        day = min(registration_date.day, max_day_in_month)
-        current_date = datetime(year=next_year, month=next_month, day=day)
-
-    # Ensure the COE expiry date is included in both monthly and yearly prices
-    expiry_date_str = coe_expiry_date.strftime('%d/%m/%Y')
-    monthly_prices[expiry_date_str] = current_price
-    yearly_prices[expiry_date_str] = current_price
-
-    return monthly_prices, yearly_prices
+        # Returning the dictionary
+        return bike_info
 
 
-def analyze_used_bike(url):
-    bike_info = extract_bike_info(url)
-    bike_depreciation = calculate_depreciation(bike_info["Price"], bike_info['Total Months Left'])
-    bike_info.update(bike_depreciation)
+class PriceProjectionStrategy:
+    @staticmethod
+    def project(registration_date, coe_expiry_date, current_price, monthly_depreciation):
+        registration_date = datetime.strptime(registration_date, '%d/%m/%Y')
+        coe_expiry_date = datetime.strptime(coe_expiry_date.split()[0], '%d/%m/%Y')
 
-    monthly_prices, yearly_prices = project_vehicle_price(bike_info["Registration Date"], bike_info["COE Expiry Date"],
-                                                          bike_info["Price"], bike_depreciation["monthly_depreciation"])
+        current_date = datetime.today()
+        total_months_since_registration = (
+                (current_date.year - registration_date.year) * 12 +
+                current_date.month - registration_date.month
+        )
 
-    # Adds the starting price of the monthly_prices into the bike info as the dealer's assumed bike value
-    try:
-        bike_info["Dealer"] = list(monthly_prices.values())[0]
-        bike_info["monthly_price_data"] = monthly_prices
-        bike_info["yearly_price_data"] = yearly_prices
-    except AttributeError:
-        bike_info["Dealer"] = np.nan
-        bike_info["monthly_price_data"] = np.nan
-        bike_info["yearly_price_data"] = np.nan
+        try:
+            original_price = current_price + (total_months_since_registration * monthly_depreciation)
+        except TypeError:
+            return [np.nan], [np.nan]
 
-    return bike_info
+        monthly_prices, yearly_prices = {}, {}
+        current_price, current_date = original_price, registration_date
+
+        while current_date <= coe_expiry_date:
+            date_str = current_date.strftime('%d/%m/%Y')
+            monthly_prices[date_str] = current_price
+            if current_date.month == registration_date.month or current_date == coe_expiry_date:
+                yearly_prices[date_str] = current_price
+
+            current_price -= monthly_depreciation
+            next_month = current_date.month + 1 if current_date.month < 12 else 1
+            next_year = current_date.year + 1 if current_date.month == 12 else current_date.year
+            max_day_in_month = calendar.monthrange(next_year, next_month)[1]
+
+            day = min(registration_date.day, max_day_in_month)
+            current_date = datetime(year=next_year, month=next_month, day=day)
+
+        expiry_date_str = coe_expiry_date.strftime('%d/%m/%Y')
+        monthly_prices[expiry_date_str] = current_price
+        yearly_prices[expiry_date_str] = current_price
+
+        return monthly_prices, yearly_prices
 
 
 def extract_coe_price(html_content):
@@ -286,155 +269,109 @@ def extract_bike_listing_urls(base_url):
     return listing_urls
 
 
-# Global cache for brands and models
-def get_db_connection():
-    db_path = "motorbike_data.db"
+class DatabaseFactory:
+    def __init__(self, db_path="motorbike_data.db"):
+        self.conn = sqlite3.connect(db_path)
+        self._initialize_tables()
 
-    # Create a new database file if it doesn't exist
-    conn = sqlite3.connect(db_path)
+    def _initialize_tables(self):
+        with self.conn:
+            self.conn.execute('''CREATE TABLE IF NOT EXISTS brands (
+                                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                    name TEXT UNIQUE NOT NULL
+                                )''')
+            self.conn.execute('''CREATE TABLE IF NOT EXISTS models (
+                                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                    brand_id INTEGER NOT NULL,
+                                    name TEXT NOT NULL,
+                                    FOREIGN KEY (brand_id) REFERENCES brands(id)
+                                )''')
 
-    # Create tables if they don't exist
-    with conn:
-        conn.execute('''CREATE TABLE IF NOT EXISTS brands (
-                            id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            name TEXT UNIQUE NOT NULL
-                        )''')
+    def prepopulate_db(self, initial_data):
+        for brand, models in initial_data.items():
+            self.insert_brand(brand, silence=True)
+            for model in models:
+                self.insert_model(brand, model, silence=True)
 
-        conn.execute('''CREATE TABLE IF NOT EXISTS models (
-                            id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            brand_id INTEGER NOT NULL,
-                            name TEXT NOT NULL,
-                            FOREIGN KEY (brand_id) REFERENCES brands(id)
-                        )''')
-
-    # Check if the tables are empty, and prepopulate if necessary
-    cursor = conn.cursor()
-
-    cursor.execute('SELECT COUNT(*) FROM brands')
-    if cursor.fetchone()[0] == 0:
-        prepopulate_db(conn)
-
-    return conn
-
-
-def prepopulate_db(conn):
-    initial_data = {
-        "Honda": ["CB125", "MSX125", "PCX150", "PCX160", "CV200X", "CV190R", "RX-X 150", "CRF150L", "ADV 150",
-                  "ADV 160",
-                  "ADV 350", "CB400F", "CBR500R"],
-        "Yamaha": ["Aerox 155", "Aerox 155 R", "FZS150", "Sniper 150", "MT-15", "X1-R 135", "XSR155"],
-        "Suzuki": ["Address 110"]
-    }
-
-    for brand, models in initial_data.items():
-        insert_brand(conn, brand, silence=True)
-        for model in models:
-            insert_model(conn, brand, model, silence=True)
-
-
-def insert_brand(conn, brand_name, silence=False):
-    brand_name = brand_name.capitalize()
-
-    cursor = conn.cursor()
-    cursor.execute('SELECT id FROM brands WHERE name = ?', (brand_name,))
-    brand_exists = cursor.fetchone()
-
-    if not brand_exists:
-        with conn:
-            conn.execute('INSERT INTO brands (name) VALUES (?)', (brand_name,))
-        if not silence:
-            st.info(f"Brand '{brand_name}' added.")
-    else:
-        if not silence:
-            st.warning(f"Brand '{brand_name}' already exists.")
-
-
-def insert_model(conn, brand_name, model_name, silence=False):
-    brand_name = brand_name.capitalize()
-    model_name = model_name.capitalize()
-
-    cursor = conn.cursor()
-    cursor.execute('SELECT id FROM brands WHERE name = ?', (brand_name,))
-    brand_id = cursor.fetchone()
-
-    if brand_id:
-        cursor.execute('''
-            SELECT id FROM models 
-            WHERE brand_id = ? AND name = ?
-        ''', (brand_id[0], model_name))
-        model_exists = cursor.fetchone()
-
-        if not model_exists:
-            with conn:
-                conn.execute('INSERT INTO models (brand_id, name) VALUES (?, ?)', (brand_id[0], model_name))
+    def insert_brand(self, brand_name, silence=False):
+        brand_name = brand_name.capitalize()
+        cursor = self.conn.cursor()
+        cursor.execute('SELECT id FROM brands WHERE name = ?', (brand_name,))
+        if not cursor.fetchone():
+            with self.conn:
+                self.conn.execute('INSERT INTO brands (name) VALUES (?)', (brand_name,))
             if not silence:
-                st.info(f"Model '{model_name}' added under brand '{brand_name}'.")
+                st.info(f"Brand '{brand_name}' added.")
         else:
             if not silence:
-                st.info(f"Model '{model_name}' already exists under brand '{brand_name}'.")
-    else:
-        if not silence:
-            st.warning(f"Brand '{brand_name}' not found. Please add the brand first.")
+                st.warning(f"Brand '{brand_name}' already exists.")
 
-
-def get_all_brands_sorted(conn):
-    cursor = conn.cursor()
-    cursor.execute('SELECT name FROM brands ORDER BY name ASC')
-    brands = [row[0] for row in cursor.fetchall()]
-    return brands
-
-
-def get_all_models_sorted(conn, brand_name):
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT models.name 
-        FROM models 
-        JOIN brands ON models.brand_id = brands.id 
-        WHERE brands.name = ?
-        ORDER BY models.name ASC
-    ''', (brand_name.capitalize(),))
-    models = [row[0] for row in cursor.fetchall()]
-    return models
-
-
-def remove_model(conn, brand_name, model_name):
-    if model_name:
-        brand_name = brand_name.capitalize()
-        model_name = model_name.capitalize()
-
-        cursor = conn.cursor()
+    def insert_model(self, brand_name, model_name, silence=False):
+        brand_name, model_name = brand_name.capitalize(), model_name.capitalize()
+        cursor = self.conn.cursor()
         cursor.execute('SELECT id FROM brands WHERE name = ?', (brand_name,))
         brand_id = cursor.fetchone()
 
         if brand_id:
-            cursor.execute('''
-                SELECT id FROM models 
-                WHERE brand_id = ? AND name = ?
-            ''', (brand_id[0], model_name))
-            model_id = cursor.fetchone()
+            cursor.execute('SELECT id FROM models WHERE brand_id = ? AND name = ?', (brand_id[0], model_name))
+            if not cursor.fetchone():
+                with self.conn:
+                    self.conn.execute('INSERT INTO models (brand_id, name) VALUES (?, ?)', (brand_id[0], model_name))
+                if not silence:
+                    st.info(f"Model '{model_name}' added under brand '{brand_name}'.")
+            else:
+                if not silence:
+                    st.info(f"Model '{model_name}' already exists under brand '{brand_name}'.")
+        else:
+            if not silence:
+                st.warning(f"Brand '{brand_name}' not found. Please add the brand first.")
 
+    def get_all_brands_sorted(self):
+        cursor = self.conn.cursor()
+        cursor.execute('SELECT name FROM brands ORDER BY name ASC')
+        return [row[0] for row in cursor.fetchall()]
+
+    def get_all_models_sorted(self, brand_name):
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT models.name 
+            FROM models 
+            JOIN brands ON models.brand_id = brands.id 
+            WHERE brands.name = ?
+            ORDER BY models.name ASC
+        ''', (brand_name.capitalize(),))
+        return [row[0] for row in cursor.fetchall()]
+
+    def remove_model(self, brand_name, model_name):
+        brand_name, model_name = brand_name.capitalize(), model_name.capitalize()
+        cursor = self.conn.cursor()
+        cursor.execute('SELECT id FROM brands WHERE name = ?', (brand_name,))
+        brand_id = cursor.fetchone()
+
+        if brand_id:
+            cursor.execute('SELECT id FROM models WHERE brand_id = ? AND name = ?', (brand_id[0], model_name))
+            model_id = cursor.fetchone()
             if model_id:
-                with conn:
-                    conn.execute('DELETE FROM models WHERE id = ?', (model_id[0],))
+                with self.conn:
+                    self.conn.execute('DELETE FROM models WHERE id = ?', (model_id[0],))
                 st.info(f"Model '{model_name}' removed from brand '{brand_name}'.")
             else:
                 st.warning(f"Model '{model_name}' does not exist under brand '{brand_name}'.")
         else:
             st.error(f"Brand '{brand_name}' not found.")
 
-
-def remove_empty_brand(conn, brand_name):
-    cursor = conn.cursor()
-    cursor.execute('''
-                    SELECT id FROM models 
-                    WHERE brand_id = ? 
-                ''', (brand_name.capitalize(),))
-    model_exists = cursor.fetchone()
-    if not model_exists:
+    def remove_empty_brand(self, brand_name):
+        cursor = self.conn.cursor()
         cursor.execute('''
-                        DELETE FROM brands WHERE name = ?
+                        SELECT id FROM models 
+                        WHERE brand_id = ? 
                     ''', (brand_name.capitalize(),))
-        st.warning(f"Brand '{brand_name}' removed.")
+        model_exists = cursor.fetchone()
+        if not model_exists:
+            cursor.execute('''
+                            DELETE FROM brands WHERE name = ?
+                        ''', (brand_name.capitalize(),))
+            st.warning(f"Brand '{brand_name}' removed.")
 
 
 def save_image_from_url(image_url, image_name, base_url="https://sgbikemart.com.sg"):
@@ -470,11 +407,13 @@ def display_bike_images(image_url, title):
         image = Image.open(image_path)
         st.image(image, caption=title, width=500)
 
+
 def safe_format(value):
-    if np.isnan(value):
+    if value is np.nan:
         return "N/A"
     else:
         return f"${value:.2f}"
+
 
 def display_bike_analysis(bike_data):
     # Get the title by combining bike_data title and the url to make it clickable
@@ -567,10 +506,11 @@ def display_bike_analysis(bike_data):
     return recommended_low_price_placeholder, recommended_price_placeholder
 
 
-motorbike_local_db = get_db_connection()
+motorbike_factory = DatabaseFactory()
+bike_analyzer = BikeAnalyzer(DepreciationStrategy(), PriceProjectionStrategy())
 
 # Streamlit app title
-st.title("Used Motorbike Price Analyser")
+st.title("Used Motorbikes scanner")
 st.caption("For TechOverflow (A 1 hour hackathon by Din)")
 
 # Sidebar: Display COE Price
@@ -597,21 +537,21 @@ sidebar_bike_coe_left = st.sidebar.empty()
 sidebar_link = st.sidebar.empty()
 
 # User Input: Select or Add Brand
-st.subheader("Search for a Used Motorbike")
+st.subheader("Search for used motorbikes")
 col1, col2 = st.columns(2)
 
 with col1:
-    brand = st.selectbox("Select Brand", options=get_all_brands_sorted(motorbike_local_db), index=0)
+    brand = st.selectbox("Select Brand", options=motorbike_factory.get_all_brands_sorted(), index=0)
     new_brand = st.text_input("Or Enter a New Brand").title()
     if new_brand:
-        insert_brand(motorbike_local_db, new_brand)
+        motorbike_factory.insert_brand(new_brand)
         brand = new_brand
 
 with col2:
-    model = st.selectbox("Select Model", options=get_all_models_sorted(motorbike_local_db, brand), index=0)
+    model = st.selectbox("Select Model", options=motorbike_factory.get_all_models_sorted(brand), index=0)
     new_model = st.text_input("Or Enter a New Model").title()
     if new_model:
-        insert_model(motorbike_local_db, brand, new_model)
+        motorbike_factory.insert_model(brand, new_model)
         model = new_model
 
 # Additional search filters with defaults
@@ -640,7 +580,7 @@ if st.button("Search"):
     page = 1
     while True:
 
-        bike_listings_url = generate_used_bike_search_url(
+        bike_listings_url = BikeURLGenerator.generate(
             bike_model=bike_model_cleaned,
             price_from=price_from,
             price_to=price_to,
@@ -660,15 +600,14 @@ if st.button("Search"):
     st.subheader(f"Found {len(bike_listing_urls)} bikes:")
     st.header("Analyzing Bikes...")
     st.caption("Scroll down to see details")
-    progress_bar1 = st.progress(0)
+    progress_bar1 = st.progress(0, text="Fetching all data to plot graphs")
     # Initialize empty DataFrame for scatter charts
     scatter_data = pd.DataFrame(columns=["COE Months Left", "Price",
                                          # "Annual_Depreciation"
                                          ])
-    depreciation_data = pd.DataFrame( columns=["COE Months Left",
+    depreciation_data = pd.DataFrame(columns=["COE Months Left",
                                               # "Price",
                                               "Annual Depreciation", ])
-
 
     # Initialize the scatter charts
     st.subheader("Price over COE left in bikes")
@@ -693,7 +632,7 @@ if st.button("Search"):
 
     if len(bike_listing_urls) == 0:
         st.warning("No bikes found with the given criteria.")
-        test_url = generate_used_bike_search_url(
+        test_url = BikeURLGenerator.generate(
             bike_model=bike_model_cleaned,
 
         )
@@ -701,10 +640,11 @@ if st.button("Search"):
         if len(test_count) < 1:
             st.warning(
                 f"We could find any bikes for {bike_model_cleaned}, perhaps you should try another model, or the spacing is wrong e.g MSX125 instead of MSX 125 and ADV 150 instead of ADV150.\n This bike model will be removed from the database")
-            remove_model(motorbike_local_db, brand, model)
-            remove_empty_brand(motorbike_local_db, brand)
+            motorbike_factory.remove_model(brand, model)
+            motorbike_factory.remove_empty_brand(brand)
 
-    progress_bar = st.progress(0)
+    st.title(f"All {brand} {model} analysis")
+    progress_bar = st.progress(0, text="Fetching all data for individual bike analysis below")
     bike_data_list = []
 
     lowest_dealer_price = float('inf')
@@ -712,7 +652,7 @@ if st.button("Search"):
     analyzed_bikes = []
 
     for i, url in enumerate(bike_listing_urls):
-        bd = analyze_used_bike(url)
+        bd = bike_analyzer.analyze(url)
         bike_data_list.append(bd)
 
         # Update lowest dealer price if a new low is found
@@ -731,7 +671,6 @@ if st.button("Search"):
             sidebar_posting_id.caption(f"Listing ID: {lowest_bd['URL'].split('/')[-2]}")
 
         if bd["Price"] is not np.nan:
-
             # Add new row to scatter data (Delta DataFrame)
             new_scatter_data = pd.DataFrame({
                 "COE Months Left": [float(bd['Total Months Left'])],
@@ -739,7 +678,7 @@ if st.button("Search"):
                 # "Annual_Depreciation": [bd['annual_depreciation']]
             })
 
-            scatter_chart.add_rows(new_scatter_data.set_index("COE Months Left") )
+            scatter_chart.add_rows(new_scatter_data.set_index("COE Months Left"))
 
             # Add new row to depreciation data (Delta DataFrame)
             new_depreciation_data = pd.DataFrame({
@@ -765,10 +704,11 @@ if st.button("Search"):
                 delta_low_price = recommended_low_price - bd['Price']
                 delta_middle_price = recommended_middle_price - bd['Price']
             except:
-                monthly_depreciations = [b["monthly_depreciation"] for b in bike_data_list if b["monthly_depreciation"] is not np.nan]
+                monthly_depreciations = [b["monthly_depreciation"] for b in bike_data_list if
+                                         b["monthly_depreciation"] is not np.nan]
                 average_monthly_depreciation = np.mean(monthly_depreciations)
-                recommended_middle_price =(bd['Total Months Left'] * average_monthly_depreciation)
-                recommended_low_price = (lowest_dealer_price + recommended_middle_price) /2
+                recommended_middle_price = (bd['Total Months Left'] * average_monthly_depreciation)
+                recommended_low_price = (lowest_dealer_price + recommended_middle_price) / 2
                 delta_low_price = delta_middle_price = np.nan
 
             placeholder_low.metric(label="Recommended Low Price", value=f"${recommended_low_price:.2f}",
