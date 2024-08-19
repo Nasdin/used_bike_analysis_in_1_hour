@@ -24,7 +24,7 @@ st.set_page_config(page_title="Used Motorbike Price Analyser", page_icon="üèçÔ∏
 
 class BikeURLGenerator:
     @staticmethod
-    def generate(bike_model="Honda", bike_type="", price_from="", price_to="", license_class="2B",
+    def generate(bike_model="", bike_type="", price_from="", price_to="", license_class="",
                  reg_year_from="1970", reg_year_to="2024", monthly_from="", monthly_to="",
                  user="", status=10, category="", page=1):
         base_url = "https://sgbikemart.com.sg/listing/usedbikes/listing/"
@@ -635,7 +635,7 @@ def get_search_filters():
     with col4:
         price_to = st.text_input("Price To", "")
 
-    license_class = st.selectbox("License Class", ["", "2B", "2A", "2"], index=1)
+    license_class = st.selectbox("License Class", ["", "2B", "2A", "2"], index=0)
 
     col5, col6 = st.columns(2)
     with col5:
@@ -681,7 +681,8 @@ def fetch_bike_listing_urls(brand, model, filters):
 # Function to handle no results found
 def handle_no_results(motorbike_factory, brand, model):
     st.warning("No bikes found with the given criteria.")
-    test_url = BikeURLGenerator.generate(bike_model=f"{brand} {model}".replace(" ", "+"))
+    test_url = BikeURLGenerator.generate(bike_model=f"{brand} {model}".replace(" ", "+"),
+                                         license_class="")
     if not extract_bike_listing_urls(test_url):
         st.warning(
             f"We could not find any bikes for {brand} {model}. Consider trying a different model or checking for spacing errors."
