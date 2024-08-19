@@ -423,10 +423,25 @@ coe_price_per_month = coe_price / 120
 coe_price_per_year = coe_price / 10
 today_date = pd.Timestamp.now().strftime("%d/%m/%Y")
 
+
+
 st.sidebar.subheader(f"Price as of {today_date}")
 st.sidebar.metric(label="COE Price", value=f"${coe_price:.2f}")
 st.sidebar.metric(label="Per Month", value=f"${coe_price_per_month:.2f}")
 st.sidebar.metric(label="Per Year", value=f"${coe_price_per_year:.2f}")
+
+
+st.sidebar.header("Analytics Summary")
+st.sidebar.caption("Most price to value motorbike found")
+sidebar_model = st.sidebar.empty()
+sidebar_posting_id = st.sidebar.empty()
+sidebar_price = st.sidebar.empty()
+c,d = st.sidebar.columns(2)
+sidebar_monthly_depreciation = c.empty()
+sidebar_annual_depreciation = d.empty()
+sidebar_bike_coe_left = st.sidebar.empty()
+sidebar_link = st.sidebar.empty()
+
 
 # User Input: Select or Add Brand
 st.subheader("Search for a Used Motorbike")
@@ -487,6 +502,7 @@ if st.button("Search"):
     bike_data_list = []
 
     lowest_dealer_price = float('inf')
+    lowest_bd = {}
     analyzed_bikes = []
 
     for i, url in enumerate(bike_listing_urls):
@@ -496,6 +512,16 @@ if st.button("Search"):
         # Update lowest dealer price if a new low is found
         if bd['Dealer'] < lowest_dealer_price:
             lowest_dealer_price = bd['Dealer']
+            lowest_bd = bd
+
+            sidebar_model.subheader(lowest_bd['Title'])
+            sidebar_price.metric(label="Asking Price", value=f"${lowest_bd['Price']:.2f}")
+            sidebar_monthly_depreciation.metric(label="Monthly Depreciation", value=f"${lowest_bd['monthly_depreciation']:.2f}")
+            sidebar_annual_depreciation.metric(label="Annual Depreciation", value=f"${lowest_bd['annual_depreciation']:.2f}")
+            sidebar_bike_coe_left.metric(label="COE Left", value=lowest_bd['Years & Months Left'])
+            sidebar_link.markdown(f"[SGBike Mart Listing]({lowest_bd['URL']})")
+            sidebar_posting_id.caption(f"Listing ID: {lowest_bd['URL'].split('/')[-2]}")
+
 
         placeholder_low, placeholder_rec = display_bike_analysis(bd)
         analyzed_bikes.append((bd, placeholder_low, placeholder_rec))
@@ -508,9 +534,11 @@ if st.button("Search"):
             recommended_middle_price = (recommended_low_price + bd['Price']) / 2
 
             placeholder_low.metric(label="Recommended Low Price", value=f"${recommended_low_price:.2f}",
-                                   delta=f"{recommended_low_price - bd['Price']}", delta_color="inverse")
+                                   delta=f"{recommended_low_price - bd['Price']}", delta_color="inverse",
+                                   help="Based on the lowest dealer price found of {lowest_dealer_price:.2f}")
             placeholder_rec.metric(label="Recommended Middle Price:", value=f"${recommended_middle_price:.2f}",
-                                   delta=f"{recommended_middle_price - bd['Price']}", delta_color="inverse")
+                                   delta=f"{recommended_middle_price - bd['Price']}", delta_color="inverse",
+                                   help="Middle price between the lowest dealer price and the current asking price")
 
     st.success("All bike details fetched and displayed.")
     st.info("You can now select another bike to analyze.")
