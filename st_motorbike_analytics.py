@@ -470,6 +470,11 @@ def display_bike_images(image_url, title):
         image = Image.open(image_path)
         st.image(image, caption=title, width=500)
 
+def safe_format(value):
+    if np.isnan(value):
+        return "N/A"
+    else:
+        return f"${value:.2f}"
 
 def display_bike_analysis(bike_data):
     # Get the title by combining bike_data title and the url to make it clickable
@@ -484,18 +489,18 @@ def display_bike_analysis(bike_data):
     # Highlighted metrics: Annual and Monthly Depreciation
     col1, col2 = st.columns(2)
     with col1:
-        st.metric(label="Analytics: Annual Depreciation", value=f"${bike_data['annual_depreciation']}",
+        st.metric(label="Analytics: Annual Depreciation", value=safe_format(bike_data['annual_depreciation']),
                   help="Estimated based on the bike becoming 10% of its value at end of COE")
     with col2:
-        st.metric(label="Analytics: Monthly Depreciation", value=f"${bike_data['monthly_depreciation']}",
+        st.metric(label="Analytics: Monthly Depreciation", value=safe_format(bike_data['monthly_depreciation']),
                   help="The 'True' cost of your bike every month, as it will become close to worthless at end of its COE lifespan")
 
     # Dealer's Assumed Bike Original Value
     col3, col4 = st.columns(2)
-    col3.metric(label=f"Analytics: Dealer's Assumed Original Value", value=f"${bike_data['Dealer']}",
+    col3.metric(label="Analytics: Dealer's Assumed Original Value", value=safe_format(bike_data['Dealer']),
                 help="What the dealer is pricing it at if its new, you should compare with the actual new price")
 
-    col4.metric(label="Current Asking Price:", value=f"${bike_data['Price']}",
+    col4.metric(label="Current Asking Price:", value=safe_format(bike_data['Price']),
                 help="You should deduct the asking price based on the % difference between brand new vs dealer's assumed value.")
     st.caption(
         "If dealer is charging much more than what it costs new, you should deduct the difference from the asking price.")
