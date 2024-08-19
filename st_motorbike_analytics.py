@@ -6,11 +6,12 @@ import tempfile
 import time
 from datetime import datetime
 from urllib.parse import urljoin
+import asyncio
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import requests
+import aiohttp
 import streamlit as st
 from PIL import Image
 from bs4 import BeautifulSoup
@@ -59,6 +60,7 @@ class DepreciationStrategy:
 
 def split_currency_value(amount_str):
     # Identify where the numerical part starts
+    i=0
     for i, char in enumerate(amount_str):
         if char.isdigit():
             break
@@ -116,8 +118,8 @@ class BikeAnalyzer:
             delta_middle_price = np.nan
         return recommended_middle_price, delta_middle_price
 
-    def analyze(self, url):
-        bike_info = extract_bike_info(url)
+    async def analyze(self, session, url):
+        bike_info = await extract_bike_info(session, url)
         bike_depreciation = self.depreciation_strategy.calculate(bike_info["Price"], bike_info['Total Months Left'])
         bike_info.update(bike_depreciation)
 
@@ -141,11 +143,10 @@ class BikeAnalyzer:
         return bike_info
 
 
-@st.cache_data(ttl=2592000)
-def extract_bike_info(bike_url):
-    # Same as your extract_bike_info function implementation
-    response = requests.get(bike_url)
-    soup = BeautifulSoup(response.content, 'html.parser')
+async def extract_bike_info(session, bike_url):
+    async with session.get(bike_url) as response:
+        html_content = await response.text()
+    soup = BeautifulSoup(html_content, 'html.parser')
 
     # Extracting information
     title = soup.find('h2', class_='card-title').text.strip()
@@ -275,13 +276,14 @@ def extract_coe_price(html_content):
     return None
 
 
-def get_current_coe_price():
+async def get_current_coe_price(session):
     url = "https://sgbikemart.com.sg"
-    response = requests.get(url)
-    return split_currency_value(extract_coe_price(response.content))["Price"]
+    async with session.get(url) as response:
+        html_content = await response.text()
+    return split_currency_value(extract_coe_price(html_content))["Price"]
 
 
-def extract_bike_listing_urls(base_url):
+async def extract_bike_listing_urls(session, base_url):
     """
     Extracts and returns a list of absolute URLs for bike listings from the given webpage.
 
@@ -291,8 +293,8 @@ def extract_bike_listing_urls(base_url):
     Returns:
     list: A list of absolute URLs pointing to individual bike listings.
     """
-    response = requests.get(base_url)
-    html_content = response.text
+    async with session.get(base_url) as response:
+        html_content = await response.text
 
     # Parse the HTML content using BeautifulSoup
     soup = BeautifulSoup(html_content, 'html.parser')
@@ -312,11 +314,11 @@ def extract_bike_listing_urls(base_url):
 
 class DatabaseFactory:
     initial_data = {
-        "Honda": ["CB125", "MSX125", "PCX150", "PCX160", "CV200X", "CV190R", "RX-X 150", "CRF150L", "ADV 150",
+        "Honda": ["CB125", " ", "MSX125", "PCX150", "PCX160", "CV200X", "CV190R", "RX-X 150", "CRF150L", "ADV 150",
                   "ADV 160",
                   "ADV 350", "CB400F", "CBR500R"],
-        "Yamaha": ["Aerox 155", "Aerox 155 R", "FZS150", "Sniper 150", "MT-15", "X1-R 135", "XSR155"],
-        "Suzuki": ["Address 110"]
+        "Yamaha": ["Aerox 155", "", "Aerox 155 R", "FZS150", "Sniper 150", "MT-15", "X1-R 135", "XSR155"],
+        "Suzuki": ["Address 110", ""]
     }
 
     def __init__(self, db_path="./motorbike_data.db"):
@@ -432,34 +434,36 @@ class DatabaseFactory:
             st.warning(f"Brand '{brand_name}' removed.")
 
 
-def save_image_from_url(image_url, image_name, base_url="https://sgbikemart.com.sg"):
+async def save_image_from_url(session, image_url, image_name, base_url="https://sgbikemart.com.sg"):
     try:
         # Ensure the URL is absolute
         if not image_url.startswith(('http://', 'https://')):
             image_url = urljoin(base_url, image_url)
 
-        response = requests.get(image_url)
-        if response.status_code == 200:
-            # Create a temporary directory
-            temp_dir = tempfile.gettempdir()
-            image_path = os.path.join(temp_dir, image_name)
+        async with session.get(image_url) as response:
 
-            # Save image to the temporary directory
-            with open(image_path, 'wb') as f:
-                f.write(response.content)
+            if response.status == 200:
+                # Create a temporary directory
+                temp_dir = tempfile.gettempdir()
+                image_path = os.path.join(temp_dir, image_name)
 
-            return image_path
-        else:
-            st.warning(f"Failed to download image: {image_url}")
-            return None
+                # Save image to the temporary directory
+                with open(image_path, 'wb') as f:
+                    f.write(await response.read())
+
+                return image_path
+            else:
+                st.warning(f"Failed to download image: {image_url}")
+                return None
+
     except Exception as e:
         st.error(f"Error saving image: {e}")
         return None
 
 
-def display_bike_images(image_url, title):
+async def display_bike_images(session, image_url, title):
     image_name = image_url.split("/")[-1]  # Extract the image name from the URL
-    image_path = save_image_from_url(image_url, image_name)
+    image_path = await save_image_from_url(session, image_url, image_name)
 
     if image_path:
         image = Image.open(image_path)
@@ -584,9 +588,9 @@ def display_price_data(bike_data):
             st.pyplot(plt)
 
 
-def display_bike_analysis(bike_data):
+async def display_bike_analysis(session, bike_data):
     display_bike_title_and_links(bike_data)
-    display_bike_images(bike_data["Image URL"], bike_data["Title"])
+    await display_bike_images(session, bike_data["Image URL"], bike_data["Title"])
     display_metrics(bike_data)
     recommended_low_price_placeholder, recommended_price_placeholder = display_recommended_prices()
     display_bike_details_table(bike_data)
@@ -595,9 +599,9 @@ def display_bike_analysis(bike_data):
     return recommended_low_price_placeholder, recommended_price_placeholder
 
 
-def display_coe_price_sidebar():
+async def display_coe_price_sidebar(session):
     st.sidebar.header("Current Motorbike COE Price")
-    coe_price = get_current_coe_price()
+    coe_price = await get_current_coe_price(session)
     coe_price_per_month = coe_price / 120
     coe_price_per_year = coe_price / 10
     today_date = pd.Timestamp.now().strftime("%d/%m/%Y")
@@ -655,7 +659,7 @@ def get_search_filters():
 
 
 # Function to fetch bike listing URLs
-def fetch_bike_listing_urls(brand, model, filters):
+async def fetch_bike_listing_urls(session, brand, model, filters):
     bike_model_cleaned = f"{brand} {model}".replace(" ", "+")
     bike_listing_urls = []
     page = 1
@@ -671,7 +675,7 @@ def fetch_bike_listing_urls(brand, model, filters):
             page=page
         )
 
-        new_bike_listing_urls = extract_bike_listing_urls(bike_listings_url)
+        new_bike_listing_urls = await extract_bike_listing_urls(session, bike_listings_url)
         if not new_bike_listing_urls:
             break
         bike_listing_urls.extend(new_bike_listing_urls)
@@ -681,11 +685,11 @@ def fetch_bike_listing_urls(brand, model, filters):
 
 
 # Function to handle no results found
-def handle_no_results(motorbike_factory, brand, model):
+async def handle_no_results(session, motorbike_factory, brand, model):
     st.warning("No bikes found with the given criteria.")
     test_url = BikeURLGenerator.generate(bike_model=f"{brand} {model}".replace(" ", "+"),
                                          license_class="")
-    if not extract_bike_listing_urls(test_url):
+    if not await extract_bike_listing_urls(session, test_url):
         st.warning(
             f"We could not find any bikes for {brand} {model}. Consider trying a different model or checking for spacing errors."
             "e.g MSX125 instead of MSX 125 and ADV 150 instead of ADV150.\n This bike model will be removed from the database"
@@ -748,7 +752,7 @@ def initialize_charts():
     return scatter_chart, depreciation_chart
 
 
-def display_search_results(bike_listing_urls, bike_analyzer, brand, model, sidebar_data):
+async def display_search_results(session, bike_listing_urls, bike_analyzer, brand, model, sidebar_data):
     """Displays the search results and analyzes each bike."""
     st.subheader(f"Found {len(bike_listing_urls)} bikes:")
     st.header("Analyzing Bikes...")
@@ -762,7 +766,7 @@ def display_search_results(bike_listing_urls, bike_analyzer, brand, model, sideb
     progress_bar = st.progress(0)
 
     for i, url in enumerate(bike_listing_urls):
-        bike_data, low_placeholder, rec_placeholder, sidebar_data = analyze_bike(url, bike_analyzer, sidebar_data)
+        bike_data, low_placeholder, rec_placeholder, sidebar_data = await analyze_bike(session, url, bike_analyzer, sidebar_data)
         analyzed_bikes.append((bike_data, low_placeholder, rec_placeholder))
 
         if bike_data["Price"] is not np.nan:
@@ -778,9 +782,9 @@ def display_search_results(bike_listing_urls, bike_analyzer, brand, model, sideb
     st.info("You can now select another bike to analyze.")
 
 
-def analyze_bike(url, bike_analyzer, sidebar_data):
-    bike_data = bike_analyzer.analyze(url)
-    recommended_low_placeholder, recommended_placeholder = display_bike_analysis(bike_data)
+async def analyze_bike(session, url, bike_analyzer, sidebar_data):
+    bike_data = await bike_analyzer.analyze(session, url)
+    recommended_low_placeholder, recommended_placeholder = await display_bike_analysis(session, bike_data)
 
     sidebar_data = update_sidebar_if_lowest(bike_data, bike_analyzer.lowest_dealer_price_seen, sidebar_data)
 
@@ -844,7 +848,7 @@ def update_sidebar_if_lowest(bd, lowest_dealer_price, sidebar_data):
     return sidebar_data
 
 
-def main():
+async def main():
     # Streamlit app title and subtitle
     st.title("Used Motorbikes Scanner")
     st.caption("For TechOverflow (A 1 hour hackathon by Din)")
@@ -852,31 +856,31 @@ def main():
     # Initialize necessary objects
     motorbike_factory = DatabaseFactory()
     bike_analyzer = BikeAnalyzer(DepreciationStrategy(), PriceProjectionStrategy())
+    async with aiohttp.ClientSession() as session:
+        # Sidebar: Display COE Price
+        await display_coe_price_sidebar(session)
 
-    # Sidebar: Display COE Price
-    display_coe_price_sidebar()
+        # Sidebar: Analytics Summary
+        sidebar_data = display_analytics_sidebar()  # Initialize sidebar placeholders
 
-    # Sidebar: Analytics Summary
-    sidebar_data = display_analytics_sidebar()  # Initialize sidebar placeholders
+        # User Input: Select or Add Brand and Model
+        brand, model = select_or_add_brand_and_model(motorbike_factory)
 
-    # User Input: Select or Add Brand and Model
-    brand, model = select_or_add_brand_and_model(motorbike_factory)
+        # Additional search filters with defaults
+        filters = get_search_filters()
 
-    # Additional search filters with defaults
-    filters = get_search_filters()
+        # Search Button
+        if st.button("Search"):
+            # Fetch bike listing URLs based on brand, model, and filters
+            bike_listing_urls = await fetch_bike_listing_urls(session, brand, model, filters)
 
-    # Search Button
-    if st.button("Search"):
-        # Fetch bike listing URLs based on brand, model, and filters
-        bike_listing_urls = fetch_bike_listing_urls(brand, model, filters)
-
-        if not bike_listing_urls:
-            # Handle the case where no results are found
-            handle_no_results(motorbike_factory, brand, model)
-        else:
-            # Display search results and analyze the bikes
-            display_search_results(bike_listing_urls, bike_analyzer, brand, model, sidebar_data)
+            if not bike_listing_urls:
+                # Handle the case where no results are found
+                await handle_no_results(session, motorbike_factory, brand, model)
+            else:
+                # Display search results and analyze the bikes
+                await display_search_results(session, bike_listing_urls, bike_analyzer, brand, model, sidebar_data)
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
