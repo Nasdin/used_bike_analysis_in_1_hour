@@ -140,6 +140,7 @@ def extract_bike_info(url):
         "Type of Vehicle": vehicle_type,
         "Description": description,
         "Image URL": image_url,
+        "URL": url
     }
     bike_info.update(split_currency_value(price))
 
@@ -273,10 +274,11 @@ def get_cached_data():
     return {
         "brands": ["Honda", "Yamaha", "Suzuki"],  # Pre-populate with some brands
         "models": {
-            "Honda": ["CB125", "MSX125", "PCX150", "PCX160", "CV200X", "CV190R", "RX-X 150", "CRF150L", "ADV 150", "ADV 160", "ADV 350", "CB400F",
-                      "CBR500R"],
-            "Yamaha": ["Aerox 155", "Aerox 155 R", "FZS150", "Sniper 150", "MT-15", "X1-R 135", "XSR155"],
-            "Suzuki": ["Address 110"]}
+            "Honda": sorted(["CB125", "MSX125", "PCX150", "PCX160", "CV200X", "CV190R", "RX-X 150", "CRF150L", "ADV 150", "ADV 160", "ADV 350", "CB400F",
+                             "CBR500R"]),
+            "Yamaha": sorted(["Aerox 155", "Aerox 155 R", "FZS150", "Sniper 150", "MT-15", "X1-R 135", "XSR155"]),
+            "Suzuki": sorted(["Address 110"])
+        }
     }
 
 
@@ -311,12 +313,18 @@ def display_bike_images(image_url, title):
 
     if image_path:
         image = Image.open(image_path)
-        st.image(image, caption=title, use_column_width=True)
+        st.image(image, caption=title, width=600)
 
 
 def display_bike_analysis(bike_data):
-    # Title
+
+    # Get the title by combining bike_data title and the url to make it clickable
+    # Create new title by combining the title and the post number found at the end of the url
     st.title(bike_data["Title"])
+    col1, col2 = st.columns(2)
+    col1.caption("SGBike Mart Listing ID: " + bike_data["URL"].split("/")[-2])
+    col2.markdown(f"[SGBike Mart Listing]({bike_data['URL']})")
+
     display_bike_images(bike_data["Image URL"], bike_data["Title"])
 
     # Highlighted metrics: Annual and Monthly Depreciation
@@ -326,18 +334,21 @@ def display_bike_analysis(bike_data):
     with col2:
         st.metric(label="Monthly Depreciation", value=f"${bike_data['monthly_depreciation']:.2f}")
 
-    col3, col4 = st.columns(2)
     # Dealer's Assumed Bike Original Value
-    col3.metric(label=f"Dealer's Assumed Bike Original Value",
-                value=f"${bike_data['Dealer']:.2f}")
+    col3, col4 = st.columns(2)
+    col3.metric(label=f"Dealer's Assumed Bike Original Value", value=f"${bike_data['Dealer']:.2f}")
     col3.caption("Assumed bike if new price, compare with what you know it costs if you buy new")
     col3.caption("If this difference is too high, it means the used price might be overpriced.")
     col4.metric(label="Current Asking Price:", value=f"${bike_data['Price']:.2f}")
 
-    col4.caption(
-        "You should deduct the asking price based on the % difference between brand new vs dealer's assumed value.")
-    col4.caption(
-        "e.g New costs 15k, but dealer assumed value is 18k,= 17% difference, so deduct 17% from asking price.")
+    col4.caption("You should deduct the asking price based on the % difference between brand new vs dealer's assumed value.")
+    col4.caption("e.g New costs 15k, but dealer assumed value is 18k,= 17% difference, so deduct 17% from asking price.")
+
+    # Placeholder for recommended price and low price
+    st.subheader("Analytics")
+    recommended_low_price_placeholder = st.empty()
+    recommended_price_placeholder = st.empty()
+
 
     # Bike Details in a Table
     details_data = {
@@ -352,6 +363,7 @@ def display_bike_analysis(bike_data):
         "Price": f"${bike_data['Price']}",
         "Currency": bike_data["Currency"],
         "Description": bike_data["Description"],
+        "SGBike Mart Listing URL": bike_data["URL"],
     }
 
     details_df = pd.DataFrame(details_data.items(), columns=["Attribute", "Value"])
@@ -386,8 +398,12 @@ def display_bike_analysis(bike_data):
         plt.xticks(rotation=45)
         st.pyplot(plt)
 
+    return recommended_low_price_placeholder, recommended_price_placeholder
+
 
 cached_data = get_cached_data()
+for brand in cached_data["models"]:
+    cached_data["models"][brand].sort()
 
 # Streamlit app title
 st.title("Used Motorbike Price Analyser")
@@ -443,9 +459,9 @@ with col5:
 with col6:
     reg_year_to = st.text_input("Registration Year To", "2024")
 
+
 # Search Button
 if st.button("Search"):
-
     bike_model_cleaned = f"{brand} {model}".replace(" ", "+")
 
     bike_listings_url = generate_used_bike_search_url(
@@ -464,9 +480,15 @@ if st.button("Search"):
     progress_bar = st.progress(0)
     bike_data_list = []
 
+    lowest_dealer_price = float('inf')
+
     for i, url in enumerate(bike_listing_urls):
         bd = analyze_used_bike(url)
         bike_data_list.append(bd)
+
+        # Update lowest dealer price if a new low is found
+        if bd['Dealer'] < lowest_dealer_price:
+            lowest_dealer_price = bd['Dealer']
 
         display_bike_analysis(bd)
         progress_bar.progress((i + 1) / len(bike_listing_urls))
