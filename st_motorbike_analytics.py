@@ -1,3 +1,4 @@
+import asyncio
 import calendar
 import os
 import re
@@ -6,12 +7,11 @@ import tempfile
 import time
 from datetime import datetime
 from urllib.parse import urljoin
-import asyncio
 
+import aiohttp
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import aiohttp
 import streamlit as st
 from PIL import Image
 from bs4 import BeautifulSoup
@@ -60,7 +60,7 @@ class DepreciationStrategy:
 
 def split_currency_value(amount_str):
     # Identify where the numerical part starts
-    i=0
+    i = 0
     for i, char in enumerate(amount_str):
         if char.isdigit():
             break
@@ -294,7 +294,7 @@ async def extract_bike_listing_urls(session, base_url):
     list: A list of absolute URLs pointing to individual bike listings.
     """
     async with session.get(base_url) as response:
-        html_content = await response.text
+        html_content = await response.text()
 
     # Parse the HTML content using BeautifulSoup
     soup = BeautifulSoup(html_content, 'html.parser')
@@ -764,9 +764,15 @@ async def display_search_results(session, bike_listing_urls, bike_analyzer, bran
 
     analyzed_bikes = []
     progress_bar = st.progress(0)
+    total_bikes = len(bike_listing_urls)
 
-    for i, url in enumerate(bike_listing_urls):
-        bike_data, low_placeholder, rec_placeholder, sidebar_data = await analyze_bike(session, url, bike_analyzer, sidebar_data)
+    analysis_tasks = [bike_analyzer.analyze(session, url) for url in bike_listing_urls]
+    for i, analysis_task in enumerate(asyncio.as_completed(analysis_tasks)):
+        bike_data = await analysis_task
+
+        low_placeholder, rec_placeholder = await display_bike_analysis(session, bike_data)
+        sidebar_data = update_sidebar_if_lowest(bike_data, bike_analyzer.lowest_dealer_price_seen, sidebar_data)
+
         analyzed_bikes.append((bike_data, low_placeholder, rec_placeholder))
 
         if bike_data["Price"] is not np.nan:
@@ -774,21 +780,12 @@ async def display_search_results(session, bike_listing_urls, bike_analyzer, bran
 
         # Update recommended placeholders
         update_recommended_placeholders(analyzed_bikes, bike_analyzer)
-        progress_bar.progress((i + 1) / len(bike_listing_urls), text=f"{i + 1}/{len(bike_listing_urls)} bikes fetched")
-        progress_bar1.progress((i + 1) / len(bike_listing_urls), text=f"{i + 1}/{len(bike_listing_urls)} bikes fetched")
+        progress_bar.progress((i + 1) / len(bike_listing_urls), text=f"{i + 1}/{total_bikes} bikes fetched")
+        progress_bar1.progress((i + 1) / len(bike_listing_urls), text=f"{i + 1}/{total_bikes} bikes fetched")
         time.sleep(0.05)
 
     st.success("All bike details fetched and displayed.")
     st.info("You can now select another bike to analyze.")
-
-
-async def analyze_bike(session, url, bike_analyzer, sidebar_data):
-    bike_data = await bike_analyzer.analyze(session, url)
-    recommended_low_placeholder, recommended_placeholder = await display_bike_analysis(session, bike_data)
-
-    sidebar_data = update_sidebar_if_lowest(bike_data, bike_analyzer.lowest_dealer_price_seen, sidebar_data)
-
-    return bike_data, recommended_low_placeholder, recommended_placeholder, sidebar_data
 
 
 def update_charts(scatter_chart, depreciation_chart, bd):
