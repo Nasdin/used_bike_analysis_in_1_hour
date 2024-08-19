@@ -602,25 +602,9 @@ def display_coe_price_sidebar():
 
     st.sidebar.subheader(f"Price as of {today_date}")
     st.sidebar.metric(label="COE Price", value=f"${coe_price:.2f}")
-    st.sidebar.metric(label="Per Month", value=f"${coe_price_per_month:.2f}")
-    st.sidebar.metric(label="Per Year", value=f"${coe_price_per_year:.2f}")
-
-
-def display_analytics_sidebar():
-    st.sidebar.header("Analytics Summary")
-    st.sidebar.caption("Most price-to-value motorbike found")
-    global sidebar_model, sidebar_posting_id, sidebar_price
-    global sidebar_monthly_depreciation, sidebar_annual_depreciation
-    global sidebar_bike_coe_left, sidebar_link
-
-    sidebar_model = st.sidebar.empty()
-    sidebar_posting_id = st.sidebar.empty()
-    sidebar_price = st.sidebar.empty()
-    sidebar_depreciation = st.sidebar.columns(2)
-    sidebar_monthly_depreciation = sidebar_depreciation[0].empty()
-    sidebar_annual_depreciation = sidebar_depreciation[1].empty()
-    sidebar_bike_coe_left = st.sidebar.empty()
-    sidebar_link = st.sidebar.empty()
+    col1, col2 = st.sidebar.columns(2)
+    col1.metric(label="Per Month", value=f"${coe_price_per_month:.2f}")
+    col2.metric(label="Per Year", value=f"${coe_price_per_year:.2f}")
 
 
 # Function to select or add brand and model
@@ -743,48 +727,6 @@ def update_recommended_placeholders(analyzed_bikes, bike_analyzer):
         )
 
 
-def analyze_bike(url, bike_analyzer):
-    """Analyzes a single bike and returns the bike data along with placeholders for recommendations."""
-    bike_data = bike_analyzer.analyze(url)
-    recommended_low_placeholder, recommended_placeholder = display_bike_analysis(bike_data)
-
-    update_sidebar_if_lowest(bike_data, bike_analyzer.lowest_dealer_price_seen)
-
-    return bike_data, recommended_low_placeholder, recommended_placeholder
-
-
-# Function to display search results
-def display_search_results(bike_listing_urls, bike_analyzer, brand, model):
-    """Displays the search results and analyzes each bike."""
-    st.subheader(f"Found {len(bike_listing_urls)} bikes:")
-    st.header("Analyzing Bikes...")
-    progress_bar1 = st.progress(0)
-    st.caption("Scroll down to see details")
-
-    scatter_chart, depreciation_chart = initialize_charts()
-    st.title(f"All {brand} {model} analysis")
-
-    analyzed_bikes = []
-    progress_bar = st.progress(0)
-
-    for i, url in enumerate(bike_listing_urls):
-        bike_data, low_placeholder, rec_placeholder = analyze_bike(url, bike_analyzer)
-        analyzed_bikes.append((bike_data, low_placeholder, rec_placeholder))
-
-        if bike_data["Price"] is not np.nan:
-            update_charts(scatter_chart, depreciation_chart, bike_data)
-
-        # Should be updated during the analyzing for loop
-        # To create a real-time updating app
-        update_recommended_placeholders(analyzed_bikes, bike_analyzer)
-        progress_bar.progress((i + 1) / len(bike_listing_urls), text=f"{i + 1}/{len(bike_listing_urls)} bikes fetched")
-        progress_bar1.progress((i + 1) / len(bike_listing_urls), text=f"{i + 1}/{len(bike_listing_urls)} bikes fetched")
-        time.sleep(0.05)
-
-    st.success("All bike details fetched and displayed.")
-    st.info("You can now select another bike to analyze.")
-
-
 # Function to initialize charts
 def initialize_charts():
     scatter_data = pd.DataFrame(columns=["COE Months Left", "Price"])
@@ -801,24 +743,45 @@ def initialize_charts():
     return scatter_chart, depreciation_chart
 
 
-# Function to update sidebar if lowest price found
-def update_sidebar_if_lowest(bd, lowest_dealer_price):
-    global sidebar_model, sidebar_posting_id, sidebar_price
-    global sidebar_monthly_depreciation, sidebar_annual_depreciation
-    global sidebar_bike_coe_left, sidebar_link
+def display_search_results(bike_listing_urls, bike_analyzer, brand, model, sidebar_data):
+    """Displays the search results and analyzes each bike."""
+    st.subheader(f"Found {len(bike_listing_urls)} bikes:")
+    st.header("Analyzing Bikes...")
+    progress_bar1 = st.progress(0)
+    st.caption("Scroll down to see details")
 
-    current_dealer_price = bd['Dealer']
-    if current_dealer_price <= lowest_dealer_price:
-        sidebar_model.subheader(bd['Title'])
-        sidebar_price.metric(label="Asking Price", value=f"${bd['Price']:.2f}")
-        sidebar_monthly_depreciation.metric(label="Monthly Depreciation", value=f"${bd['monthly_depreciation']:.2f}")
-        sidebar_annual_depreciation.metric(label="Annual Depreciation", value=f"${bd['annual_depreciation']:.2f}")
-        sidebar_bike_coe_left.metric(label="COE Left", value=bd['Years & Months Left'])
-        sidebar_link.markdown(f"[SGBike Mart Listing]({bd['URL']})")
-        sidebar_posting_id.caption(f"Listing ID: {bd['URL'].split('/')[-2]}")
+    scatter_chart, depreciation_chart = initialize_charts()
+    st.title(f"All {brand} {model} analysis")
+
+    analyzed_bikes = []
+    progress_bar = st.progress(0)
+
+    for i, url in enumerate(bike_listing_urls):
+        bike_data, low_placeholder, rec_placeholder, sidebar_data = analyze_bike(url, bike_analyzer, sidebar_data)
+        analyzed_bikes.append((bike_data, low_placeholder, rec_placeholder))
+
+        if bike_data["Price"] is not np.nan:
+            update_charts(scatter_chart, depreciation_chart, bike_data)
+
+        # Update recommended placeholders
+        update_recommended_placeholders(analyzed_bikes, bike_analyzer)
+        progress_bar.progress((i + 1) / len(bike_listing_urls), text=f"{i + 1}/{len(bike_listing_urls)} bikes fetched")
+        progress_bar1.progress((i + 1) / len(bike_listing_urls), text=f"{i + 1}/{len(bike_listing_urls)} bikes fetched")
+        time.sleep(0.05)
+
+    st.success("All bike details fetched and displayed.")
+    st.info("You can now select another bike to analyze.")
 
 
-# Function to update charts
+def analyze_bike(url, bike_analyzer, sidebar_data):
+    bike_data = bike_analyzer.analyze(url)
+    recommended_low_placeholder, recommended_placeholder = display_bike_analysis(bike_data)
+
+    sidebar_data = update_sidebar_if_lowest(bike_data, bike_analyzer.lowest_dealer_price_seen, sidebar_data)
+
+    return bike_data, recommended_low_placeholder, recommended_placeholder, sidebar_data
+
+
 def update_charts(scatter_chart, depreciation_chart, bd):
     new_scatter_data = pd.DataFrame({
         "COE Months Left": [float(bd['Total Months Left'])],
@@ -833,17 +796,63 @@ def update_charts(scatter_chart, depreciation_chart, bd):
     depreciation_chart.add_rows(new_depreciation_data.set_index("COE Months Left"))
 
 
+def display_analytics_sidebar():
+    st.sidebar.header("Analytics Summary")
+    st.sidebar.caption("Most price-to-value motorbike found")
+    sidebar_model = st.sidebar.empty()
+    sidebar_posting_id = st.sidebar.empty()
+    sidebar_price = st.sidebar.empty()
+    col1, col2 = st.sidebar.columns(2)
+    sidebar_annual_depreciation = col1.empty()
+    sidebar_monthly_depreciation = col2.empty()
+    sidebar_bike_coe_left = st.sidebar.empty()
+    sidebar_link = st.sidebar.empty()
+
+    sidebar_data = {
+
+        "sidebar_model": sidebar_model,
+        "sidebar_posting_id": sidebar_posting_id,
+        "sidebar_price": sidebar_price,
+        "sidebar_monthly_depreciation": sidebar_monthly_depreciation,
+        "sidebar_annual_depreciation": sidebar_annual_depreciation,
+        "sidebar_bike_coe_left": sidebar_bike_coe_left,
+        "sidebar_link": sidebar_link
+
+    }
+
+    return sidebar_data
+
+
+def update_sidebar_if_lowest(bd, lowest_dealer_price, sidebar_data):
+    current_dealer_price = bd['Dealer']
+    if current_dealer_price <= lowest_dealer_price:
+        sidebar_data['sidebar_model'].subheader(bd['Title'])
+        sidebar_data['sidebar_price'].metric(label="Asking Price", value=f"${bd['Price']:.2f}")
+        sidebar_data['sidebar_monthly_depreciation'].metric(label="Monthly Depreciation",
+                                                            value=f"${bd['monthly_depreciation']:.2f}")
+        sidebar_data['sidebar_annual_depreciation'].metric(label="Annual Depreciation",
+                                                           value=f"${bd['annual_depreciation']:.2f}")
+        sidebar_data['sidebar_bike_coe_left'].metric(label="COE Left", value=bd['Years & Months Left'])
+        sidebar_data['sidebar_link'].markdown(f"[SGBike Mart Listing]({bd['URL']})")
+        sidebar_data['sidebar_posting_id'].caption(f"Listing ID: {BikeAnalyzer.extract_sgbikemart_id(['URL'])}")
+
+    return sidebar_data
+
+
 def main():
     # Streamlit app title and subtitle
     st.title("Used Motorbikes Scanner")
     st.caption("For TechOverflow (A 1 hour hackathon by Din)")
+
+    # Initialize necessary objects
     motorbike_factory = DatabaseFactory()
     bike_analyzer = BikeAnalyzer(DepreciationStrategy(), PriceProjectionStrategy())
+
     # Sidebar: Display COE Price
     display_coe_price_sidebar()
 
     # Sidebar: Analytics Summary
-    display_analytics_sidebar()
+    sidebar_data = display_analytics_sidebar()  # Initialize sidebar placeholders
 
     # User Input: Select or Add Brand and Model
     brand, model = select_or_add_brand_and_model(motorbike_factory)
@@ -853,12 +862,15 @@ def main():
 
     # Search Button
     if st.button("Search"):
+        # Fetch bike listing URLs based on brand, model, and filters
         bike_listing_urls = fetch_bike_listing_urls(brand, model, filters)
 
         if not bike_listing_urls:
+            # Handle the case where no results are found
             handle_no_results(motorbike_factory, brand, model)
         else:
-            display_search_results(bike_listing_urls, bike_analyzer, brand, model)
+            # Display search results and analyze the bikes
+            display_search_results(bike_listing_urls, bike_analyzer, brand, model, sidebar_data)
 
 
 if __name__ == "__main__":
