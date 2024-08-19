@@ -273,9 +273,9 @@ def get_cached_data():
     return {
         "brands": ["Honda", "Yamaha", "Suzuki"],  # Pre-populate with some brands
         "models": {
-            "Honda": ["CB125", "MSX125", "PCX150", "CV200X", "CV190R", "RX-X 150", "CRF150L", "ADV 150", "CB400F",
+            "Honda": ["CB125", "MSX125", "PCX150", "CV200X", "CV190R", "RX-X 150", "CRF150L", "ADV 150", "ADV 350", "CB400F",
                       "CBR500R"],
-            "Yamaha": ["Aerox 155", "Aerox 155 R", "FZS150", "Sniper 150", "MT-15", "X1-R 135"],
+            "Yamaha": ["Aerox 155", "Aerox 155 R", "FZS150", "Sniper 150", "MT-15", "X1-R 135", "XSR155"],
             "Suzuki": ["Address 110"]}
     }
 
