@@ -758,7 +758,10 @@ if st.button("Search"):
                 delta_low_price = recommended_low_price - bd['Price']
                 delta_middle_price = recommended_middle_price - bd['Price']
             except:
-                recommended_low_price = recommended_middle_price = np.nan
+                monthly_depreciations = [b["monthly_depreciation"] for b in bike_data_list if b["monthly_depreciation"] is not np.nan]
+                average_monthly_depreciation = np.mean(monthly_depreciations)
+                recommended_middle_price =(bd['Total Months Left'] * average_monthly_depreciation)
+                recommended_low_price = (lowest_dealer_price + recommended_middle_price) /2
                 delta_low_price = delta_middle_price = np.nan
 
             placeholder_low.metric(label="Recommended Low Price", value=f"${recommended_low_price:.2f}",
