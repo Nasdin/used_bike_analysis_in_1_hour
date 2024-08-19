@@ -274,8 +274,10 @@ def get_cached_data():
     return {
         "brands": ["Honda", "Yamaha", "Suzuki"],  # Pre-populate with some brands
         "models": {
-            "Honda": sorted(["CB125", "MSX125", "PCX150", "PCX160", "CV200X", "CV190R", "RX-X 150", "CRF150L", "ADV 150", "ADV 160", "ADV 350", "CB400F",
-                             "CBR500R"]),
+            "Honda": sorted(
+                ["CB125", "MSX125", "PCX150", "PCX160", "CV200X", "CV190R", "RX-X 150", "CRF150L", "ADV 150", "ADV 160",
+                 "ADV 350", "CB400F",
+                 "CBR500R"]),
             "Yamaha": sorted(["Aerox 155", "Aerox 155 R", "FZS150", "Sniper 150", "MT-15", "X1-R 135", "XSR155"]),
             "Suzuki": sorted(["Address 110"])
         }
@@ -313,11 +315,10 @@ def display_bike_images(image_url, title):
 
     if image_path:
         image = Image.open(image_path)
-        st.image(image, caption=title, width=600)
+        st.image(image, caption=title, width=500)
 
 
 def display_bike_analysis(bike_data):
-
     # Get the title by combining bike_data title and the url to make it clickable
     # Create new title by combining the title and the post number found at the end of the url
     st.title(bike_data["Title"])
@@ -330,24 +331,27 @@ def display_bike_analysis(bike_data):
     # Highlighted metrics: Annual and Monthly Depreciation
     col1, col2 = st.columns(2)
     with col1:
-        st.metric(label="Analytics: Annual Depreciation", value=f"${bike_data['annual_depreciation']:.2f}")
+        st.metric(label="Analytics: Annual Depreciation", value=f"${bike_data['annual_depreciation']:.2f}",
+                  help="Estimated based on the bike becoming 10% of its value at end of COE")
     with col2:
-        st.metric(label="Analytics: Monthly Depreciation", value=f"${bike_data['monthly_depreciation']:.2f}")
+        st.metric(label="Analytics: Monthly Depreciation", value=f"${bike_data['monthly_depreciation']:.2f}",
+                  help="The 'True' cost of your bike every month, as it will become close to worthless at end of its COE lifespan")
 
     # Dealer's Assumed Bike Original Value
     col3, col4 = st.columns(2)
-    col3.metric(label=f"Analytics: Dealer's Assumed Original Value", value=f"${bike_data['Dealer']:.2f}")
-    col3.caption("Assumed bike if new price, compare with what you know it costs if you buy new")
-    col3.caption("If this difference is too high, it means the used price might be overpriced.")
-    col4.metric(label="Current Asking Price:", value=f"${bike_data['Price']:.2f}")
+    col3.metric(label=f"Analytics: Dealer's Assumed Original Value", value=f"${bike_data['Dealer']:.2f}",
+                help="What the dealer is pricing it at if its new, you should compare with the actual new price")
 
-    col4.caption("You should deduct the asking price based on the % difference between brand new vs dealer's assumed value.")
-    col4.caption("e.g New costs 15k, but dealer assumed value is 18k,= 17% difference, so deduct 17% from asking price.")
-
+    col4.metric(label="Current Asking Price:", value=f"${bike_data['Price']:.2f}",
+                help="You should deduct the asking price based on the % difference between brand new vs dealer's assumed value.")
+    st.caption(
+        "If dealer is charging much more than what it costs new, you should deduct the difference from the asking price.")
+    st.caption("e.g New costs 15k, but dealer assumed value is 18k,= 17% difference, so deduct 17% from asking price.")
     # Placeholder for recommended price and low price
-    st.subheader("Analytics: Recommended Price Ranges")
+    st.subheader("Analytics: Recommended Prices to offer")
+    st.caption("We get this estimate by comparing with other listings")
     col5, col6 = st.columns(2)
-    st.caption("This analysis will update as you fetch more data!")
+    st.caption("This offer value will update as we fetch more data!")
     recommended_low_price_placeholder = col5.empty()
     recommended_price_placeholder = col6.empty()
 
@@ -462,7 +466,6 @@ with col5:
 with col6:
     reg_year_to = st.text_input("Registration Year To", "2024")
 
-
 # Search Button
 if st.button("Search"):
     bike_model_cleaned = f"{brand} {model}".replace(" ", "+")
@@ -504,9 +507,10 @@ if st.button("Search"):
             recommended_low_price = lowest_dealer_price / bd['Dealer'] * bd['Price']
             recommended_middle_price = (recommended_low_price + bd['Price']) / 2
 
-            placeholder_low.metric(label="Recommended Low Price", value=f"${recommended_low_price:.2f}", delta=f"{recommended_low_price - bd['Price']}" , delta_color="inverse")
-            placeholder_rec.metric(label="Recommended Middle Price:", value=f"${recommended_middle_price:.2f}", delta=f"{recommended_middle_price - bd['Price']}" , delta_color="inverse")
-
+            placeholder_low.metric(label="Recommended Low Price", value=f"${recommended_low_price:.2f}",
+                                   delta=f"{recommended_low_price - bd['Price']}", delta_color="inverse")
+            placeholder_rec.metric(label="Recommended Middle Price:", value=f"${recommended_middle_price:.2f}",
+                                   delta=f"{recommended_middle_price - bd['Price']}", delta_color="inverse")
 
     st.success("All bike details fetched and displayed.")
     st.info("You can now select another bike to analyze.")
