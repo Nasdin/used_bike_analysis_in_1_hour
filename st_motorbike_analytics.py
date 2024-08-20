@@ -3,7 +3,6 @@ import calendar
 import os
 import re
 import tempfile
-import time
 from datetime import datetime
 from typing import List
 from urllib.parse import urljoin
@@ -758,17 +757,18 @@ async def display_search_results(session, bike_listing_urls, bike_analyzer, bran
 
 
 def update_charts(scatter_chart, depreciation_chart, bd):
-    new_scatter_data = pd.DataFrame({
-        "COE Months Left": [float(bd['Total Months Left'])],
-        "Price": [bd['Price']]
-    })
-    scatter_chart.add_rows(new_scatter_data.set_index("COE Months Left"))
-
-    new_depreciation_data = pd.DataFrame({
-        "COE Months Left": [float(bd['Total Months Left'])],
-        "Annual Depreciation": [bd['annual_depreciation']]
-    })
-    depreciation_chart.add_rows(new_depreciation_data.set_index("COE Months Left"))
+    if bd["Price"] is not np.nan and isinstance(bd['Price'], float):
+        new_scatter_data = pd.DataFrame({
+            "COE Months Left": [float(bd['Total Months Left'])],
+            "Price": [bd['Price']]
+        })
+        scatter_chart.add_rows(new_scatter_data.set_index("COE Months Left"))
+    if bd["annual_depreciation"] is not np.nan and isinstance(bd['annual_depreciation'], float):
+        new_depreciation_data = pd.DataFrame({
+            "COE Months Left": [float(bd['Total Months Left'])],
+            "Annual Depreciation": [bd['annual_depreciation']]
+        })
+        depreciation_chart.add_rows(new_depreciation_data.set_index("COE Months Left"))
 
 
 def display_analytics_sidebar():
