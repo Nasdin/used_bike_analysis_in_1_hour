@@ -544,10 +544,16 @@ def display_bike_details_table(bike_data):
 def display_price_data(bike_data):
     if bike_data['Price'] is not np.nan:
         with st.expander("Show Monthly Price Data"):
-            monthly_df = pd.DataFrame.from_dict(bike_data["monthly_price_data"], orient='index', columns=["Price"])
+            try:
+                monthly_df = pd.DataFrame.from_dict(bike_data["monthly_price_data"], orient='index', columns=["Price"])
+            except TypeError:
+                monthly_df = pd.DataFrame(columns=["Price"])
             st.dataframe(monthly_df)
         with st.expander("Show Yearly Price Data"):
-            yearly_df = pd.DataFrame.from_dict(bike_data["yearly_price_data"], orient='index', columns=["Price"])
+            try:
+                yearly_df = pd.DataFrame.from_dict(bike_data["yearly_price_data"], orient='index', columns=["Price"])
+            except TypeError:
+                yearly_df = pd.DataFrame(columns=["Price"])
             st.dataframe(yearly_df)
 
 
