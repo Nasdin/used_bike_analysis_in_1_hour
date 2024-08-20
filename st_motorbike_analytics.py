@@ -746,7 +746,6 @@ async def display_search_results(session, bike_listing_urls, bike_analyzer, bran
         update_recommended_placeholders(analyzed_bikes, bike_analyzer)
         progress_bar.progress((i + 1) / len(bike_listing_urls), text=f"{i + 1}/{total_bikes} bikes fetched")
         progress_bar1.progress((i + 1) / len(bike_listing_urls), text=f"{i + 1}/{total_bikes} bikes fetched")
-        time.sleep(0.05)
 
     st.success("All bike details fetched and displayed.")
     st.info("You can now select another bike to analyze.")
