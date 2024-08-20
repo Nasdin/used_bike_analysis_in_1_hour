@@ -2,10 +2,10 @@ import asyncio
 import calendar
 import os
 import re
-import sqlite3
 import tempfile
 import time
 from datetime import datetime
+from typing import List
 from urllib.parse import urljoin
 
 import aiohttp
@@ -14,6 +14,9 @@ import pandas as pd
 import streamlit as st
 from PIL import Image
 from bs4 import BeautifulSoup
+from sqlmodel import SQLModel, create_engine, Session, select
+
+from models import Brand, Model
 
 st.set_page_config(page_title="Used Motorbike Price Analyser", page_icon="🏍️", menu_items={
     "About": "This is a simple app to analyze used motorbike prices from SGBikeMart. "
@@ -314,126 +317,99 @@ async def extract_bike_listing_urls(session, base_url):
     return listing_urls
 
 
+@st.cache_resource
+def create_sql_alchemy_engine(db_path="./motorbike_data.db"):
+    engine = create_engine(f"sqlite:///{db_path}")
+    return engine
+
+
 class DatabaseFactory:
     initial_data = {
-        "Honda": ["CB125", " ", "MSX125", "PCX150", "PCX160", "CV200X", "CV190R", "RX-X 150", "CRF150L", "ADV 150",
+        "Honda": ["CB125", "MSX125", "PCX150", "PCX160", "CV200X", "CV190R", "RX-X 150", "CRF150L", "ADV 150",
                   "ADV 160",
                   "ADV 350", "CB400F", "CBR500R"],
-        "Yamaha": ["Aerox 155", "", "Aerox 155 R", "FZS150", "Sniper 150", "MT-15", "X1-R 135", "XSR155"],
-        "Suzuki": ["Address 110", ""]
+        "Yamaha": ["Aerox 155", "Aerox 155 R", "FZS150", "Sniper 150", "MT-15", "X1-R 135", "XSR155"],
+        "Suzuki": ["Address 110"]
     }
 
     def __init__(self, db_path="./motorbike_data.db"):
-        self.conn = sqlite3.connect(db_path)
-        self._initialize_tables()
+        self.engine = create_sql_alchemy_engine(db_path)
+        self.create_tables_if_not_exist()
+        self.prepopulate_db_if_needed()
 
-    def _initialize_tables(self):
-        with self.conn:
-            self.conn.execute('''CREATE TABLE IF NOT EXISTS brands (
-                                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                                    name TEXT UNIQUE NOT NULL
-                                )''')
-            self.conn.execute('''CREATE TABLE IF NOT EXISTS models (
-                                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                                    brand_id INTEGER NOT NULL,
-                                    name TEXT NOT NULL,
-                                    FOREIGN KEY (brand_id) REFERENCES brands(id)
-                                )''')
+    def create_tables_if_not_exist(self):
+        # This method ensures tables are created if they don't exist
+        SQLModel.metadata.create_all(self.engine,
+                                     checkfirst=True)
 
-            # Check if the tables are empty, and prepopulate if necessary
-            cursor = self.conn.cursor()
-
-            cursor.execute('SELECT COUNT(*) FROM brands')
-            if cursor.fetchone()[0] == 0:
+    def prepopulate_db_if_needed(self):
+        with Session(self.engine) as session:
+            brand_count = session.exec(select(Brand)).first()
+            if brand_count is None:  # If no brands exist, prepopulate
                 self.prepopulate_db()
 
     def prepopulate_db(self):
-        for brand, models in self.initial_data.items():
-            self.insert_brand(brand, silence=True)
-            for model in models:
-                self.insert_model(brand, model, silence=True)
+        with Session(self.engine) as session:
+            for brand_name, models in self.initial_data.items():
+                brand_name = self.insert_brand(brand_name, session)
+                for model_name in models:
+                    if model_name.strip():  # Skip empty model names
+                        self.insert_model_for_brand(brand_name, model_name, session)
 
-    def insert_brand(self, brand_name, silence=False):
-        brand_name = brand_name.capitalize()
-        cursor = self.conn.cursor()
-        cursor.execute('SELECT id FROM brands WHERE name = ?', (brand_name,))
-        if not cursor.fetchone():
-            with self.conn:
-                self.conn.execute('INSERT INTO brands (name) VALUES (?)', (brand_name,))
-            if not silence:
-                st.info(f"Brand '{brand_name}' added.")
-        else:
-            if not silence:
-                st.warning(f"Brand '{brand_name}' already exists.")
+    def insert_brand(self, brand_name: Brand.name, session: Session = None) -> Brand:
+        if session is None:
+            with Session(self.engine) as session:
+                brand_name = brand_name.capitalize()
+                brand = session.exec(select(Brand).where(Brand.name == brand_name)).first()
+                if not brand:
+                    brand = Brand(name=brand_name)
+                    session.add(brand)
+                    session.commit()
+                    session.refresh(brand)
+                return brand
 
-    def insert_model(self, brand_name, model_name, silence=False):
-        brand_name, model_name = brand_name.capitalize(), model_name.capitalize()
-        cursor = self.conn.cursor()
-        cursor.execute('SELECT id FROM brands WHERE name = ?', (brand_name,))
-        brand_id = cursor.fetchone()
+    def insert_model_for_brand(self, brand_name: Brand.name, model_name: Model.name, session: Session = None) -> Model:
+        if session is None:
+            with Session(self.engine) as session:
+                brand = self.insert_brand(brand_name, session)
+                model_name = model_name.capitalize()
+                model = session.exec(select(Model).where(Model.brand_id == brand.id, Model.name == model_name)).first()
+                if not model:
+                    model = Model(name=model_name, brand_id=brand.id)
+                    session.add(model)
+                    session.commit()
+                return model
 
-        if brand_id:
-            cursor.execute('SELECT id FROM models WHERE brand_id = ? AND name = ?', (brand_id[0], model_name))
-            if not cursor.fetchone():
-                with self.conn:
-                    self.conn.execute('INSERT INTO models (brand_id, name) VALUES (?, ?)', (brand_id[0], model_name))
-                if not silence:
-                    st.info(f"Model '{model_name}' added under brand '{brand_name}'.")
-            else:
-                if not silence:
-                    st.info(f"Model '{model_name}' already exists under brand '{brand_name}'.")
-        else:
-            if not silence:
-                st.warning(f"Brand '{brand_name}' not found. Please add the brand first.")
+    def get_all_brands_sorted(self) -> List[str]:
+        with Session(self.engine) as session:
+            return [brand.name for brand in session.exec(select(Brand).order_by(Brand.name)).all()]
 
-    def get_all_brands_sorted(self):
-        cursor = self.conn.cursor()
-        cursor.execute('SELECT name FROM brands ORDER BY name ASC')
-        return [row[0] for row in cursor.fetchall()]
+    def get_all_models_sorted(self, brand_name: str) -> List[str]:
+        with Session(self.engine) as session:
+            brand = session.exec(select(Brand).where(Brand.name == brand_name.capitalize())).first()
+            if brand:
+                return [model.name for model in
+                        session.exec(select(Model).where(Model.brand_id == brand.id).order_by(Model.name)).all()]
+            return []
 
-    def get_all_models_sorted(self, brand_name):
-        cursor = self.conn.cursor()
-        cursor.execute('''
-            SELECT models.name 
-            FROM models 
-            JOIN brands ON models.brand_id = brands.id 
-            WHERE brands.name = ?
-            ORDER BY models.name ASC
-        ''', (brand_name.capitalize(),))
-        return [row[0] for row in cursor.fetchall()]
+    def remove_model(self, brand_name: Brand.name, model_name: Model.name):
+        with Session(self.engine) as session:
+            brand = session.exec(select(Brand).where(Brand.name == brand_name.capitalize())).first()
+            if brand:
+                model = session.exec(
+                    select(Model).where(Model.brand_id == brand.id, Model.name == model_name.capitalize())).first()
+                if model:
+                    session.delete(model)
+                    session.commit()
 
-    def remove_model(self, brand_name, model_name):
-        brand_name, model_name = brand_name.capitalize(), model_name.capitalize()
-        cursor = self.conn.cursor()
-        cursor.execute('SELECT id FROM brands WHERE name = ?', (brand_name,))
-        brand_id = cursor.fetchone()
-
-        if brand_id:
-            cursor.execute('SELECT id FROM models WHERE brand_id = ? AND name = ?', (brand_id[0], model_name))
-            model_id = cursor.fetchone()
-            if model_id:
-                with self.conn:
-                    self.conn.execute('DELETE FROM models WHERE id = ?', (model_id[0],))
-                st.info(f"Model '{model_name}' removed from brand '{brand_name}'.")
-            else:
-                st.warning(f"Model '{model_name}' does not exist under brand '{brand_name}'.")
-        else:
-            st.error(f"Brand '{brand_name}' not found.")
-
-    def remove_empty_brand(self, brand_name):
-        cursor = self.conn.cursor()
-        cursor.execute('SELECT id FROM brands WHERE name = ?', (brand_name.capitalize(),))
-        brand_id = cursor.fetchone()[0]
-        cursor.execute('''
-                        SELECT id FROM models 
-                        WHERE brand_id = ? 
-                    ''', (brand_id,))
-        model_exists = cursor.fetchone()
-        if not model_exists:
-            cursor.execute('''
-                            DELETE FROM brands WHERE id = ?
-                        ''', (brand_id,))
-            st.warning(f"Brand '{brand_name}' removed.")
+    def remove_brand_if_empty(self, brand_name: Brand.name):
+        with Session(self.engine) as session:
+            brand = session.exec(select(Brand).where(Brand.name == brand_name.capitalize())).first()
+            if brand:
+                models = session.exec(select(Model).where(Model.brand_id == brand.id)).all()
+                if not models:
+                    session.delete(brand)
+                    session.commit()
 
 
 async def download_bike_image(session, bike_info):
@@ -615,7 +591,7 @@ def select_or_add_brand_and_model(motorbike_factory):
         model = st.selectbox("Select Model", options=motorbike_factory.get_all_models_sorted(brand), index=0)
         new_model = st.text_input("Or Enter a New Model").title()
         if new_model:
-            motorbike_factory.insert_model(brand, new_model)
+            motorbike_factory.insert_model_for_brand(brand, new_model)
             model = new_model
 
     return brand, model
@@ -685,7 +661,7 @@ async def handle_no_results(session, motorbike_factory, brand, model):
         if model:
             motorbike_factory.remove_model(brand, model)
         if brand:
-            motorbike_factory.remove_empty_brand(brand)
+            motorbike_factory.remove_brand_if_empty(brand)
 
 
 def update_recommended_placeholders(analyzed_bikes, bike_analyzer):
