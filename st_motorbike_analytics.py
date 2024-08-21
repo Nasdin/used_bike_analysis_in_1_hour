@@ -5,6 +5,7 @@ import re
 import tempfile
 from datetime import datetime
 from typing import List
+from typing import Optional
 from urllib.parse import urljoin
 
 import aiohttp
@@ -13,15 +14,27 @@ import pandas as pd
 import streamlit as st
 from PIL import Image
 from bs4 import BeautifulSoup
-from sqlmodel import SQLModel, create_engine, Session, select
-
-from models import Brand, Model
+from sqlmodel import SQLModel, Field
+from sqlmodel import create_engine, Session, select
 
 st.set_page_config(page_title="Used Motorbike Price Analyser", page_icon="🏍️", menu_items={
     "About": "This is a simple app to analyze used motorbike prices from SGBikeMart. "
              "It was built within an hour, and then fixed over 3 hours."
              "By Din. https://github.com/Nasdin/used_bike_analysis_in_1_hour",
     "Report a Bug": "https://github.com/Nasdin/used_bike_analysis_in_1_hour"})
+
+SQLModel.__table_args__ = {'extend_existing': True}
+
+
+class Brand(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(unique=True, nullable=False)
+
+
+class Model(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    brand_id: Optional[int] = Field(default=None, foreign_key="brand.id")
+    name: str = Field(nullable=False)
 
 
 class BikeURLGenerator:
@@ -357,27 +370,29 @@ class DatabaseFactory:
 
     def insert_brand(self, brand_name: Brand.name, session: Session = None) -> Brand:
         if session is None:
-            with Session(self.engine) as session:
-                brand_name = brand_name.capitalize()
-                brand = session.exec(select(Brand).where(Brand.name == brand_name)).first()
-                if not brand:
-                    brand = Brand(name=brand_name)
-                    session.add(brand)
-                    session.commit()
-                    session.refresh(brand)
-                return brand
+            session = Session(self.engine)
+        with session:
+            brand_name = brand_name.capitalize()
+            brand = session.exec(select(Brand).where(Brand.name == brand_name)).first()
+            if not brand:
+                brand = Brand(name=brand_name)
+                session.add(brand)
+                session.commit()
+                session.refresh(brand)
+            return brand
 
     def insert_model_for_brand(self, brand_name: Brand.name, model_name: Model.name, session: Session = None) -> Model:
         if session is None:
-            with Session(self.engine) as session:
-                brand = self.insert_brand(brand_name, session)
-                model_name = model_name.capitalize()
-                model = session.exec(select(Model).where(Model.brand_id == brand.id, Model.name == model_name)).first()
-                if not model:
-                    model = Model(name=model_name, brand_id=brand.id)
-                    session.add(model)
-                    session.commit()
-                return model
+            session = Session(self.engine)
+        with session:
+            brand = self.insert_brand(brand_name, session)
+            model_name = model_name.capitalize()
+            model = session.exec(select(Model).where(Model.brand_id == brand.id, Model.name == model_name)).first()
+            if not model:
+                model = Model(name=model_name, brand_id=brand.id)
+                session.add(model)
+                session.commit()
+            return model
 
     def get_all_brands_sorted(self) -> List[str]:
         with Session(self.engine) as session:
@@ -723,7 +738,7 @@ def initialize_charts():
 
 async def display_search_results(session, bike_listing_urls, bike_analyzer, brand, model, sidebar_data):
     """Displays the search results and analyzes each bike."""
-    st.subheader(f"Found {len(bike_listing_urls)} bikes:")
+    st.subheader(f"Found {len(bike_listing_urls)} {brand} {model} bikes:")
     st.header("Analyzing Bikes...")
     progress_bar1 = st.progress(0)
     st.caption("Scroll down to see details")
